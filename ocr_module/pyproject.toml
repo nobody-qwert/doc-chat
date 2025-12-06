@@ -1,0 +1,24 @@
+[project]
+name = "rag-mineru-ocr"
+version = "0.1.0"
+description = "Dedicated MinerU OCR service that exposes parsing and warmup endpoints."
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "mineru>=2.5.4",
+  "doclayout-yolo>=0.0.4",
+  "ultralytics>=8.0.0",
+  "transformers>=4.38.0",
+  "accelerate>=0.20.0",
+  "datasets>=2.0.0",
+  "pillow>=9.0.0",
+  "opencv-python>=4.5.0",
+  "ftfy>=6.1.1",
+  "shapely>=2.0.0",
+  "pyclipper>=1.3.0",
+  "omegaconf>=2.3.0",
+]
+
+[tool.uv]
+dev-dependencies = []

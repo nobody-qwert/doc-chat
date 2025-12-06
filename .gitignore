@@ -1,0 +1,54 @@
+# General
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+*.tmp
+.env
+**/.env
+**/.env.local
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.envrc
+.pytype/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node/Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# Docker/runtime
+*.pid
+
+# Build artifacts
+dist/
+build/
+
+# Data and indices (keep placeholders only)
+data/*
+!data/.gitkeep
+indices/*
+!indices/.gitkeep
+sample_RAG-anything/
+models/*
+!models/.gitkeep
+
+# Misc caches
+**/.ipynb_checkpoints/
+.python-version
+.ruff_cache/
+.cache/
+
+app_data/

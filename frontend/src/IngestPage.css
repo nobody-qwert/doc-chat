@@ -1,0 +1,30 @@
+.ingest-layout {
+  width: 100%;
+  --ingest-grid-columns: minmax(0, 1.65fr) minmax(320px, 1.1875fr);
+  --ingest-left-min-height: calc(100vh - 64px);
+  --ingest-upload-height: 300px;
+  --ingest-library-position: sticky;
+  --ingest-library-top: 16px;
+  --ingest-library-height: calc(100vh - 64px);
+  --ingest-library-scroll-max-height: calc(100vh - 180px);
+  --ingest-upload-scroll-height: calc(5 * 58px);
+}
+
+@media (max-width: 1250px) {
+  .ingest-layout {
+    --ingest-grid-columns: minmax(0, 1.45fr) minmax(320px, 1.1875fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .ingest-layout {
+    --ingest-grid-columns: minmax(0, 1fr);
+    --ingest-left-min-height: auto;
+    --ingest-upload-height: auto;
+    --ingest-library-position: static;
+    --ingest-library-top: auto;
+    --ingest-library-height: auto;
+    --ingest-library-scroll-max-height: 55vh;
+    --ingest-upload-scroll-height: none;
+  }
+}
