@@ -64,6 +64,7 @@ class AgenticResult:
     total_tool_calls: int = 0
     evidence_count: int = 0
     finish_reason: Optional[str] = None
+    inspector_found: Optional[bool] = None
 
 
 async def agentic_answer(
@@ -102,6 +103,8 @@ async def agentic_answer(
     steps: List[AgenticStep] = []
     evidence: List[Dict[str, Any]] = []
     total_tool_calls = 0
+    inspector_found: Optional[bool] = None
+    inspector_found_flag: Optional[bool] = None
     
     model = settings.llm_model
     
@@ -367,7 +370,13 @@ async def agentic_answer(
         for event in inspector_events:
             sub_step = _inspector_event_to_step(event, len(steps))
             steps.append(sub_step)
-        
+
+        if inspector_result is not None:
+            if inspector_result.success:
+                inspector_found_flag = bool(inspector_result.hits)
+            else:
+                inspector_found_flag = None
+
         if inspector_result and inspector_result.success and inspector_result.hits:
             inspector_evidence = _inspector_hits_to_evidence(inspector_result.hits)
             _assign_citation_ids(inspector_evidence)
@@ -403,17 +412,19 @@ async def agentic_answer(
                 total_tool_calls=total_tool_calls,
                 evidence_count=len(evidence),
                 finish_reason="inspector",
+                inspector_found=True,
             )
 
     # Step 4: Prune evidence to top items
     evidence = _prune_evidence(evidence, max_items=15)
     _assign_citation_ids(evidence)
+    composer_evidence = [] if inspector_found_flag is False else evidence
     
     # Step 5: Compose final answer
     compose_start = time.perf_counter()
     compose_response = await compose_answer(
         query,
-        evidence,
+        composer_evidence,
         llm_client,
         model,
         stream=False,
@@ -431,18 +442,19 @@ async def agentic_answer(
     ))
     
     # Step 6: Verify citations
-    verified_answer = verify_citations(answer, evidence)
+    verified_answer = verify_citations(answer, composer_evidence)
     
     return AgenticResult(
         answer=verified_answer,
         success=True,
-        sources=_build_sources(evidence),
+        sources=_build_sources(composer_evidence),
         conversation_id=conversation_id,
         needs_clarification=False,
         steps=[_step_to_dict(s) for s in steps],
         total_tool_calls=total_tool_calls,
-        evidence_count=len(evidence),
+        evidence_count=len(composer_evidence),
         finish_reason="complete",
+        inspector_found=inspector_found_flag,
     )
 
 
@@ -898,6 +910,11 @@ async def stream_agentic_answer(
             if inspector_result and not inspector_result.success
             else None
         )
+        if inspector_result is not None:
+            if inspector_result.success:
+                inspector_found = bool(inspector_result.hits)
+            else:
+                inspector_found = None
         yield _emit_step(inspector_step)
         step_num = next_step_num
 
@@ -945,12 +962,14 @@ async def stream_agentic_answer(
                 "total_tool_calls": total_tool_calls,
                 "evidence_count": len(evidence),
                 "finish_reason": "inspector",
+                "inspector_found": True,
             }) + "\n"
             return
     
     # Prune evidence
     evidence = _prune_evidence(evidence, max_items=15)
     _assign_citation_ids(evidence)
+    composer_evidence = [] if inspector_found is False else evidence
     
     # Step 4: Compose answer with streaming
     yield _emit_step(AgenticStep(step_num, "Compose Answer", "compose"), "started")
@@ -959,7 +978,7 @@ async def stream_agentic_answer(
     answer_parts: List[str] = []
     compose_stream = await compose_answer(
         query,
-        evidence,
+        composer_evidence,
         llm_client,
         model,
         stream=True,
@@ -972,7 +991,7 @@ async def stream_agentic_answer(
         yield json.dumps({"type": "token", "content": token}) + "\n"
     
     full_answer = "".join(answer_parts)
-    verified_answer = verify_citations(full_answer, evidence)
+    verified_answer = verify_citations(full_answer, composer_evidence)
     
     compose_duration = time.perf_counter() - compose_start
     compose_meta = {
@@ -995,12 +1014,13 @@ async def stream_agentic_answer(
         "type": "final",
         "answer": verified_answer,
         "needs_clarification": False,
-        "sources": _build_sources(evidence),
+        "sources": _build_sources(composer_evidence),
         "conversation_id": conversation_id,
         "steps": [_step_to_dict(s) for s in steps],
         "total_tool_calls": total_tool_calls,
-        "evidence_count": len(evidence),
+        "evidence_count": len(composer_evidence),
         "finish_reason": "complete",
+        "inspector_found": inspector_found,
     }) + "\n"
 
 

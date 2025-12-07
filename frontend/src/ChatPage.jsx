@@ -20,6 +20,7 @@ async function readJsonSafe(res) {
 }
 
 const createMessageId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
 function mergeSources(existing = [], incoming = []) {
   const base = Array.isArray(existing) ? existing : [];
   const extra = Array.isArray(incoming) ? incoming : [];
@@ -383,7 +384,15 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   };
 
   const runStreamingCompletion = useCallback(
-    async ({ payload, targetMessageId = null, anchorMessageId = null, baseContent = "", baseSources = [], baseRetrievalSources = [] }) => {
+    async ({
+      payload,
+      targetMessageId = null,
+      anchorMessageId = null,
+      baseContent = "",
+      baseSources = [],
+      baseRetrievalSources = [],
+      baseInspectorFound = null,
+    }) => {
       const res = await fetch(api.askStream, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok || !res.body) {
         const data = await readJsonSafe(res);
@@ -397,12 +406,46 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       let mergedSources = Array.isArray(baseSources) ? baseSources : [];
       let mergedRetrievalSources = Array.isArray(baseRetrievalSources) ? baseRetrievalSources : [];
       let assistantId = targetMessageId;
+      let inspectorFound = baseInspectorFound ?? null;
+      const trackInspectorFinding = (stepInfo) => {
+        if (!stepInfo || stepInfo.kind !== "inspect") return;
+        const details = stepInfo.details || {};
+        if (Object.prototype.hasOwnProperty.call(details, "found")) {
+          const rawValue = details.found;
+          const boolValue = typeof rawValue === "boolean" ? rawValue : Boolean(rawValue);
+          if (boolValue) {
+            inspectorFound = true;
+          } else if (inspectorFound == null) {
+            inspectorFound = false;
+          }
+          return;
+        }
+        if (typeof details.status === "string") {
+          const status = details.status.toLowerCase();
+          if (status === "found") {
+            inspectorFound = true;
+          } else if (status === "not_found" && inspectorFound == null) {
+            inspectorFound = false;
+          }
+        }
+      };
 
       const ensureAssistant = () => {
         if (assistantId) return assistantId;
         const newId = createMessageId();
         assistantId = newId;
-        setMessages((prev) => [...prev, { id: newId, role: "assistant", content: "", sources: mergedSources, retrievalSources: mergedRetrievalSources }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: newId,
+            role: "assistant",
+            content: "",
+            sources: mergedSources,
+            retrievalSources: mergedRetrievalSources,
+            evidenceCount: null,
+            inspectorFound: baseInspectorFound ?? null,
+          },
+        ]);
         return newId;
       };
 
@@ -491,7 +534,10 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             updateAssistant(accumulated);
           } else if (evt.type === "step") {
             const steps = Array.isArray(evt.step) ? evt.step : [evt.step];
-            steps.filter(Boolean).forEach((s) => upsertStepBubble(s));
+            steps.filter(Boolean).forEach((s) => {
+              upsertStepBubble(s);
+              trackInspectorFinding(s);
+            });
           } else if (evt.type === "final") {
             finalMeta = evt;
             if (typeof evt.answer === "string") {
@@ -500,6 +546,9 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             }
             mergedSources = mergeSources(mergedSources, evt.sources);
             mergedRetrievalSources = mergeSources(mergedRetrievalSources, evt.retrieval_sources);
+            if (typeof evt.inspector_found === "boolean") {
+              inspectorFound = evt.inspector_found;
+            }
           } else if (evt.type === "error") {
             throw new Error(evt.error || "Streaming error");
           }
@@ -518,6 +567,9 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             }
             mergedSources = mergeSources(mergedSources, evt.sources);
             mergedRetrievalSources = mergeSources(mergedRetrievalSources, evt.retrieval_sources);
+            if (typeof evt.inspector_found === "boolean") {
+              inspectorFound = evt.inspector_found;
+            }
           } else if (evt.type === "error") {
             throw new Error(evt.error || "Streaming error");
           }
@@ -530,6 +582,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       const nextConversationId = finalMeta.conversation_id || payload.conversation_id || conversationId;
       if (nextConversationId) setConversationId(nextConversationId);
       const needsFollowUp = !!finalMeta.needs_follow_up;
+      const rawEvidenceCount = finalMeta && Object.prototype.hasOwnProperty.call(finalMeta, "evidence_count") ? finalMeta.evidence_count : null;
+      let finalEvidenceCount = null;
+      if (typeof rawEvidenceCount === "number" && Number.isFinite(rawEvidenceCount)) {
+        finalEvidenceCount = rawEvidenceCount;
+      } else if (typeof rawEvidenceCount === "string" && rawEvidenceCount.trim() !== "") {
+        const parsed = Number.parseInt(rawEvidenceCount, 10);
+        if (Number.isFinite(parsed)) {
+          finalEvidenceCount = parsed;
+        }
+      }
       const consolidatedSteps = Array.isArray(finalMeta.steps) ? finalMeta.steps : [];
       if (consolidatedSteps.length) {
         const sortedSteps = consolidatedSteps.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
@@ -543,6 +605,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             content: accumulated,
             sources: mergeSources(mergedSources, finalMeta.sources),
             retrievalSources: mergeSources(mergedRetrievalSources, finalMeta.retrieval_sources),
+            evidenceCount: finalEvidenceCount,
+            inspectorFound,
             hideSources: needsFollowUp,
             pendingFollowUp: needsFollowUp,
             finishReason: finalMeta.finish_reason || null,
@@ -599,6 +663,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
         baseContent: existingAssistant.content || "",
         baseSources: existingAssistant.sources || [],
         baseRetrievalSources: existingAssistant.retrievalSources || [],
+        baseInspectorFound: existingAssistant.inspectorFound ?? null,
       });
     } catch (e) {
       setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error continuing response: ${e.message || String(e)}`, error: true }]);
@@ -706,6 +771,15 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                     : baseMarkdownStyle;
                 const markdownRenderer = isPipeline ? pipelineMarkdownComponents : markdownComponents;
                 const roleLabel = isChatParticipant ? "" : isPipeline ? "" : m.title ? m.title : "";
+                const hasEvidenceCount = typeof m.evidenceCount === "number" && Number.isFinite(m.evidenceCount);
+                const inspectorFoundFlag = typeof m.inspectorFound === "boolean" ? m.inspectorFound : null;
+                const noEvidence = (hasEvidenceCount && m.evidenceCount <= 0) || inspectorFoundFlag === false;
+                const shouldShowSources =
+                  m.role === "assistant" &&
+                  Array.isArray(m.sources) &&
+                  m.sources.length > 0 &&
+                  !m.hideSources &&
+                  !noEvidence;
                 return (
                   <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={bubbleStyle}>
                   {roleLabel ? <div style={styles.messageRole}>{roleLabel}</div> : null}
@@ -792,7 +866,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                       {formatTiming(m.timing)}
                     </div>
                   )}
-                  {m.role === "assistant" && Array.isArray(m.sources) && m.sources.length > 0 && !m.hideSources && (
+                  {shouldShowSources && (
                     <div style={styles.sourcesBlock}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Sources</div>
                       <ol style={{ margin: 0, paddingLeft: 18 }}>

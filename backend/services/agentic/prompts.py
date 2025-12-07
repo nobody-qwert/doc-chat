@@ -173,6 +173,24 @@ EVIDENCE:
 
 Compose your answer with proper citations:"""
 
+COMPOSER_NO_EVIDENCE_SYSTEM_PROMPT = """You are an honest assistant.
+
+No supporting evidence snippets are available. You must clearly state that the question cannot be answered from the provided documents.
+
+RULES:
+- Do NOT fabricate facts or citations.
+- Provide a short explanation that the corpus lacks relevant information.
+- Offer a helpful next step (e.g., suggest rephrasing the query) if appropriate."""
+
+COMPOSER_NO_EVIDENCE_USER_TEMPLATE = """USER QUERY:
+{query}
+
+OUTPUT PREFERENCES:
+{output_preferences}
+
+SITUATION:
+No evidence was retrieved from the document set. Explain that the answer cannot be determined and do not cite any sources."""
+
 
 # =============================================================================
 # EVIDENCE INSPECTOR PROMPTS (MODE 4)

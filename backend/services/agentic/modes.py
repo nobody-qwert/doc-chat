@@ -26,6 +26,8 @@ from .prompts import (
     REVIEWER_USER_TEMPLATE,
     COMPOSER_SYSTEM_PROMPT,
     COMPOSER_USER_TEMPLATE,
+    COMPOSER_NO_EVIDENCE_SYSTEM_PROMPT,
+    COMPOSER_NO_EVIDENCE_USER_TEMPLATE,
     SEMANTIC_REWRITE_SYSTEM_PROMPT,
     SEMANTIC_REWRITE_USER_TEMPLATE,
     format_evidence_for_review,
@@ -549,15 +551,24 @@ async def compose_answer(
         ComposeAnswerResult when stream=False or ComposeAnswerStreamResult when stream=True
     """
     evidence_str = format_evidence_for_composer(evidence)
+    use_no_evidence_prompt = len(evidence) == 0
     
-    user_prompt = COMPOSER_USER_TEMPLATE.format(
-        query=query,
-        evidence=evidence_str,
-        output_preferences=_format_output_preferences(output_preferences),
-    )
+    if use_no_evidence_prompt:
+        user_prompt = COMPOSER_NO_EVIDENCE_USER_TEMPLATE.format(
+            query=query,
+            output_preferences=_format_output_preferences(output_preferences),
+        )
+        system_prompt = COMPOSER_NO_EVIDENCE_SYSTEM_PROMPT
+    else:
+        user_prompt = COMPOSER_USER_TEMPLATE.format(
+            query=query,
+            evidence=evidence_str,
+            output_preferences=_format_output_preferences(output_preferences),
+        )
+        system_prompt = COMPOSER_SYSTEM_PROMPT
     
     messages = [
-        {"role": "system", "content": COMPOSER_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
     

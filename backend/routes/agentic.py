@@ -68,6 +68,7 @@ class AgenticResponse(BaseModel):
     total_tool_calls: int = 0
     evidence_count: int = 0
     finish_reason: Optional[str] = None
+    inspector_found: Optional[bool] = None
 
 
 @router.post("/ask/agentic", response_model=AgenticResponse)
@@ -129,6 +130,7 @@ async def ask_agentic(req: AgenticRequest) -> AgenticResponse:
         total_tool_calls=result.total_tool_calls,
         evidence_count=result.evidence_count,
         finish_reason=result.finish_reason,
+        inspector_found=result.inspector_found,
     )
 
 
