@@ -718,7 +718,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
         <div style={styles.sectionHeader}>
           <h2 style={styles.sectionTitle}>Chat Workspace</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={() => navigate("/ingest")} style={{ ...styles.subtleButton, padding: "8px 16px" }}>Back to Ingestion</button>
+            <button onClick={() => navigate("/ingest")} style={{ ...styles.subtleButton, padding: "8px 16px" }}>Manage Documents</button>
             <button onClick={handleResetConversation} disabled={!messages.length && !conversationId} style={{ ...styles.subtleButton, padding: "8px 16px", opacity: (!messages.length && !conversationId) ? 0.5 : 1 }}>Reset Chat</button>
             <ContextIndicator stats={contextStats} defaultLimit={ENV_CONTEXT_LIMIT} />
           </div>

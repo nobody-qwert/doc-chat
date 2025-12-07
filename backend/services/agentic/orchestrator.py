@@ -1136,7 +1136,6 @@ def _inspector_hits_to_evidence(hits: List[Dict[str, Any]]) -> List[Dict[str, An
             "order_index": idx - 1,
             "text": text,
             "document_name": doc_name,
-            "score": 1.0,
             "match_type": "inspector",
         })
     return evidence

@@ -89,12 +89,6 @@ function AppContent() {
     return () => interval && clearInterval(interval);
   }, [api.status]);
 
-  useEffect(() => {
-    if (location.pathname === "/chat" && (!systemStatus.ready || systemStatus.has_running_jobs || systemStatus.docs_count === 0)) {
-      navigate("/ingest", { replace: true });
-    }
-  }, [location.pathname, systemStatus.ready, systemStatus.has_running_jobs, systemStatus.docs_count, navigate]);
-
   const updateAskingStatus = (asking) => setSystemStatus(prev => ({ ...prev, asking }));
 
   return (
@@ -103,16 +97,19 @@ function AppContent() {
         <div style={styles.content}>
           <Routes>
             <Route path="/ingest" element={<IngestPage systemStatus={systemStatus} />} />
-            <Route path="/chat" element={systemStatus.ready && systemStatus.docs_count > 0 && !systemStatus.has_running_jobs ? (
-              <ChatPage
-                onAskingChange={updateAskingStatus}
-                warmupApi={api.warmup}
-                llmReady={systemStatus.llm_ready}
-                documents={systemStatus.documents}
-                systemStatus={systemStatus}
-              />
-            ) : (<Navigate to="/ingest" replace />)} />
-            <Route path="/" element={<Navigate to="/ingest" replace />} />
+            <Route
+              path="/chat"
+              element={(
+                <ChatPage
+                  onAskingChange={updateAskingStatus}
+                  warmupApi={api.warmup}
+                  llmReady={systemStatus.llm_ready}
+                  documents={systemStatus.documents}
+                  systemStatus={systemStatus}
+                />
+              )}
+            />
+            <Route path="/" element={<Navigate to="/chat" replace />} />
           </Routes>
         </div>
       </main>
