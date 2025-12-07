@@ -62,6 +62,8 @@ function formatProgressDetails(progress) {
   return parts.join(" ").trim();
 }
 
+const ENABLE_INVOICE_EXTRACTION = String(import.meta.env.VITE_ENABLE_INVOICE_EXTRACTION || "").toLowerCase() === "true";
+
 const styles = {
   page: {
     display: "grid",
@@ -1384,7 +1386,7 @@ export default function IngestPage({ systemStatus = {} }) {
             <span style={styles.muted}>{`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || displayDocs.length}`}</span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", justifyContent: "flex-end", alignItems: "center", minWidth: 0, flexShrink: 0 }}>
-            {invoiceDocsCount > 0 && (
+            {ENABLE_INVOICE_EXTRACTION && invoiceDocsCount > 0 && (
               <button
                 onClick={handleExtractAll}
                 disabled={extractingAll || pendingExtractionCount === 0}
