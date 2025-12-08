@@ -544,7 +544,8 @@ async def _expand_evidence_chunks(
             new_item["chunk_id"] = f"{doc_hash}::full_doc"
             new_item["order_index"] = 0
             new_item["text"] = full_text
-            new_item["match_type"] = "full_doc"
+            base_match = item.get("match_type") or "chunk"
+            new_item["match_type"] = f"{base_match}_full_doc"
             new_item["expanded_context"] = {
                 "type": "full_document",
                 "chunk_count": chunk_count,
