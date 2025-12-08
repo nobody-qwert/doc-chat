@@ -8,6 +8,7 @@ services:
       - embed
       - ocr-module
       - diagnostics
+    stop_grace_period: 1s
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT:-/app_data}
       LLM_BASE_URL: ${LLM_BASE_URL:-http://${LLM_ENDPOINT:-llm_big}:8000/v1}
@@ -38,6 +39,7 @@ services:
       args:
         PREFETCH_MODELS: ${PREFETCH_MODELS:-0}
     env_file: .env
+    stop_grace_period: 1s
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT:-/app_data}
       DATA_DIR: ${DATA_DIR:-/app_data/docs}
@@ -70,6 +72,8 @@ services:
       dockerfile: docker/llama-cpp.Dockerfile
     image: local/llama-cpp:latest
 
+    stop_grace_period: 1s
+
     environment:
       LLAMA_CUBLAS: "1"
       LLM_CONTROL_PORT: 9000
@@ -89,6 +93,7 @@ services:
 
   embed:
     image: local/llama-cpp:latest
+    stop_grace_period: 1s
     command: >
       python3 -m llama_cpp.server
       --model /models/embed/${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.Q8_0.gguf}
@@ -119,6 +124,7 @@ services:
       context: ./diagnostics
       dockerfile: Dockerfile
     env_file: .env
+    stop_grace_period: 1s
     environment:
       PORT: ${DIAGNOSTICS_PORT:-9001}
     deploy:
@@ -139,5 +145,6 @@ services:
         VITE_LLM_CONTEXT_SIZE: ${LLM_CONTEXT_SIZE:-20000}
     depends_on:
       - rag-backend
+    stop_grace_period: 1s
     ports:
       - "${FRONTEND_PORT:-5173}:80"
