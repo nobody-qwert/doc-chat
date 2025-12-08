@@ -29,6 +29,8 @@ class AppSettings:
     chat_completion_max_tokens: int
     chat_completion_reserve: int
     min_context_similarity: float
+    min_semantic_similarity: float
+    min_keyword_score: float
     no_context_response: str
     system_prompt: str
     continue_prompt: str
@@ -111,6 +113,7 @@ def load_settings() -> AppSettings:
 
     diagnostics_url = _str_env("DIAGNOSTICS_URL", "http://diagnostics:9001").rstrip("/")
 
+    min_context_similarity = float(os.environ.get("MIN_CONTEXT_SIMILARITY", "0.35") or 0.35)
     return AppSettings(
         data_dir=data_dir,
         index_dir=index_dir,
@@ -121,7 +124,9 @@ def load_settings() -> AppSettings:
         chat_context_window=llm_context_size,
         chat_completion_max_tokens=chat_completion_max_tokens,
         chat_completion_reserve=chat_completion_reserve,
-        min_context_similarity=float(os.environ.get("MIN_CONTEXT_SIMILARITY", "0.35") or 0.35),
+        min_context_similarity=min_context_similarity,
+        min_semantic_similarity=min_context_similarity,
+        min_keyword_score=_float_env("MIN_KEYWORD_SCORE", "0.5"),
         no_context_response="I couldn't find relevant information for that in the available documents.",
         system_prompt=(
             "You are a retrieval-augmented assistant. Answer strictly using the provided document snippets and cite them as [source N]. "

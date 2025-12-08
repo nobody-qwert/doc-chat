@@ -82,7 +82,8 @@ async def search_text(
                 results=[],
                 total_found=0,
             )
-        
+        keyword_threshold = getattr(settings, "min_keyword_score", 0.0)
+
         short_doc_results: List[Dict[str, Any]] = []
         long_doc_hits: List[Dict[str, Any]] = []
         long_docs_needing_semantic: List[str] = []
@@ -104,7 +105,7 @@ async def search_text(
                     fallback_chunks=chunks,
                 )
                 doc_score = _keyword_score_text(doc_text.lower(), search_terms)
-                if doc_score > 0:
+                if doc_score >= keyword_threshold:
                     short_doc_results.append({
                         "doc_hash": doc_hash,
                         "chunk_id": f"{doc_hash}::full_doc",
@@ -127,6 +128,7 @@ async def search_text(
                 doc_hash=doc_hash,
                 doc_info=doc_info,
                 context_chars=context_chars,
+                min_score=keyword_threshold,
             )
             if hits:
                 long_doc_hits.extend(hits)
@@ -163,6 +165,10 @@ async def search_text(
             )
         
         combined_results = short_doc_results + expanded_long_hits + semantic_supplement
+        combined_results = [
+            item for item in combined_results
+            if float(item.get("score", 0.0)) >= keyword_threshold
+        ]
         combined_results.sort(key=lambda x: x.get("score", 0), reverse=True)
         combined_results = combined_results[:top_k]
         
@@ -295,8 +301,12 @@ async def search_semantic(
             if len(results) >= top_k:
                 break
         
+        filtered_results = [
+            item for item in results
+            if float(item.get("score", 0.0)) >= getattr(settings, "min_semantic_similarity", 0.0)
+        ]
         results = await _expand_evidence_chunks(
-            results,
+            filtered_results,
             document_store=document_store,
             doc_chunks_cache=doc_chunks_cache,
             settings=settings,
@@ -628,6 +638,7 @@ def _score_chunks_for_doc(
     doc_hash: str,
     doc_info: Optional[Dict[str, Any]],
     context_chars: int,
+    min_score: float = 0.0,
 ) -> List[Dict[str, Any]]:
     if not search_terms:
         return []
@@ -638,7 +649,7 @@ def _score_chunks_for_doc(
         if not text:
             continue
         score = _keyword_score_text(text.lower(), search_terms)
-        if score <= 0:
+        if score < min_score:
             continue
         scores.append({
             "doc_hash": doc_hash,

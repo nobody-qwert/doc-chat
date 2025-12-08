@@ -109,7 +109,7 @@ async def _stop_llm(reason: str) -> Dict[str, Any]:
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 except Exception:
                     proc.kill()
-                proc.wait(timeout=10)
+                proc.wait(timeout=2)
 
         await asyncio.to_thread(_terminate)
         _last_status.update({
