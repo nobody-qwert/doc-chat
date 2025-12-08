@@ -889,11 +889,6 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                                       chunk {s.order_index + 1}/{s.total_chunks}
                                     </span>
                                   )}
-                                  {typeof s.score === "number" && (
-                                    <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(148, 163, 184, 0.7)" }}>
-                                      similarity: {(s.score * 100).toFixed(1)}%
-                                    </span>
-                                  )}
                                 </div>
                                 {hasChunkText && (
                                   <button type="button" onClick={() => toggleSourcePreview(m.id, sourceKey)} style={{ ...styles.sourceToggle, opacity: isExpanded ? 0.85 : 1 }}>
