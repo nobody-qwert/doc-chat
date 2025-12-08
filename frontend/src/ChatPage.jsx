@@ -104,6 +104,18 @@ function formatStepDetailValue(value) {
   }
 }
 
+function matchTypeMetadata(matchType) {
+  if (!matchType) return null;
+  const normalized = String(matchType).toLowerCase();
+  if (normalized.includes("semantic")) {
+    return { color: "#4ade80", label: "semantic search" };
+  }
+  if (normalized.includes("keyword") || normalized.includes("search_text") || normalized.includes("text")) {
+    return { color: "#facc15", label: "keyword search" };
+  }
+  return null;
+}
+
 const styles = {
   page: {
     display: "flex",
@@ -754,6 +766,11 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                   cursor: hasStepMetadata ? "pointer" : "default",
                   opacity: hasStepMetadata ? 1 : 0.5,
                 };
+                const pipelineMatchMeta =
+                  isPipeline && stepInfo && stepInfo.kind === "inspect" && stepInfo.details
+                    ? matchTypeMetadata(stepInfo.details.match_type)
+                    : null;
+                const pipelineFound = Boolean(stepInfo?.details?.found);
                 const bubbleStyle = m.error
                   ? styles.errorBubble
                   : m.role === "user"
@@ -804,6 +821,31 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                             <span style={styles.pipelineChevronPlaceholder} />
                           )}
                         </button>
+                        {pipelineMatchMeta ? (
+                          <span
+                            title={pipelineMatchMeta.label}
+                            style={{
+                              width: pipelineFound ? 12 : 6,
+                              height: pipelineFound ? 12 : 6,
+                              borderRadius: "50%",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              border: pipelineFound ? `1px solid ${pipelineMatchMeta.color}` : "none",
+                              padding: pipelineFound ? 1 : 0,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                display: "inline-block",
+                                background: pipelineMatchMeta.color,
+                              }}
+                            />
+                          </span>
+                        ) : null}
                         <div
                           style={{
                             ...styles.pipelineSummaryText,

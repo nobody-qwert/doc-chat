@@ -1297,6 +1297,7 @@ def _inspector_event_to_step(event: Dict[str, Any], step_number: int) -> Agentic
         "doc_name": doc_name,
         "doc_hash": doc_hash,
         "status": status,
+        "match_type": event.get("match_type"),
     }
     if index is not None:
         detail_payload["inspected_index"] = index

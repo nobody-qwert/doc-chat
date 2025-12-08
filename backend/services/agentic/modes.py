@@ -648,6 +648,7 @@ async def inspect_evidence(
         inspected += 1
         doc_hash = item.get("doc_hash", item.get("doc_id"))
         doc_name = item.get("document_name", item.get("original_name", "Unknown Document"))
+        match_type = item.get("match_type")
         inspected_docs.append({
             "doc_hash": doc_hash,
             "doc_name": doc_name,
@@ -682,6 +683,7 @@ async def inspect_evidence(
                     "doc_name": doc_name,
                     "doc_hash": doc_hash,
                     "index": inspected,
+                    "match_type": match_type,
                     "prompt": user_prompt,
                     "prompt_messages": prompt_messages,
                     "duration": duration,
@@ -706,6 +708,7 @@ async def inspect_evidence(
                     "doc_name": doc_name,
                     "doc_hash": doc_hash,
                     "index": inspected,
+                    "match_type": match_type,
                     "prompt": user_prompt,
                     "prompt_messages": prompt_messages,
                     "duration": duration,
@@ -726,6 +729,7 @@ async def inspect_evidence(
                 "doc_name": doc_name,
                 "doc_hash": doc_hash,
                 "index": inspected,
+                "match_type": match_type,
                 "prompt": user_prompt,
                 "prompt_messages": prompt_messages,
                 "raw_response": raw_response,
