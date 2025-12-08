@@ -737,17 +737,8 @@ async def inspect_evidence(
         if not data or not found:
             continue
         
-        citations = []
-        for citation in data.get("citations", []):
-            if citation:
-                citations.append(str(citation))
-        if doc_hash and doc_hash not in citations:
-            citations.append(doc_hash)
-        
         hits.append({
-            "answer": data.get("answer") or "",
-            "supporting_quote": data.get("supporting_quote"),
-            "citations": citations,
+            "quote": data.get("quote"),
             "doc_hash": doc_hash,
             "doc_name": doc_name,
         })

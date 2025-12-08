@@ -1122,14 +1122,11 @@ def _inspector_hits_to_evidence(hits: List[Dict[str, Any]]) -> List[Dict[str, An
     evidence: List[Dict[str, Any]] = []
     for idx, hit in enumerate(hits, 1):
         citations = hit.get("citations") or []
-        doc_hash = citations[0] if citations else hit.get("doc_hash")
+        doc_hash = hit.get("doc_hash") or (citations[0] if citations else None)
         doc_name = hit.get("doc_name") or "Unknown Document"
         parts = []
-        if hit.get("answer"):
-            parts.append(f"Extracted answer: {hit['answer']}")
-        if hit.get("supporting_quote"):
-            parts.append(f"Supporting quote: {hit['supporting_quote']}")
-        text = "\n".join(parts) if parts else (hit.get("supporting_quote") or "")
+        quote = hit.get("quote") or ""
+        text = f"Quote: {quote}" if quote else ""
         evidence.append({
             "doc_hash": doc_hash,
             "chunk_id": f"inspector_{idx}",

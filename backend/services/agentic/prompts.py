@@ -202,16 +202,13 @@ You are given the user's question and a single document snippet (which may be th
 
 Your job:
 1. Decide if the snippet contains enough information to answer the question.
-2. If yes, extract the key facts and present a concise answer with citations.
+2. If yes, extract the key facts and present a concise answer grounded in the snippet.
 
 STRICT RULES:
 - Output exactly one JSON object with schema:
   {
     "found": true | false,
-    "answer": "short natural language answer if found",
-    "supporting_quote": "direct quote from the snippet",
-    "citations": ["doc_hash or chunk_id strings"],
-    "confidence": 0.0-1.0
+    "quote": "direct quote from the snippet"
   }
 - If the snippet does not contain the required information, set found=false and leave other fields empty or defaults.
 - Never invent information not present in the snippet.
