@@ -96,12 +96,12 @@ services:
     stop_grace_period: 1s
     command: >
       python3 -m llama_cpp.server
-      --model /models/embed/${EMBED_MODEL_FILE:-nomic-embed-text-v1.5.Q8_0.gguf}
-      --model_alias ${EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
+      --model /models/embed/${EMBED_MODEL_FILE:-Qwen3-Embedding-0.6B-Q8_0.gguf}
+      --model_alias ${EMBEDDING_MODEL:-text-embedding-qwen3-0.6b}
       --host 0.0.0.0
       --port 8080
       --embedding true
-      --n_ctx ${EMBED_CONTEXT_SIZE:-2048}
+      --n_ctx ${EMBED_CONTEXT_SIZE:-32768}
       --n_gpu_layers -1
       --use_mlock true
       --api_key ${EMBEDDING_API_KEY:-local-embed}
