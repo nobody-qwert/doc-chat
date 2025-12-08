@@ -21,7 +21,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from .modes import (
     decompose_query,
-    plan_search,
+    build_initial_plan,
     review_evidence,
     compose_answer,
     inspect_evidence,
@@ -29,7 +29,6 @@ from .modes import (
     build_clarification_response,
     rewrite_semantic_query,
     PlanResult,
-    SubqueryPlan,
     InspectorResult,
 )
 from .tools import execute_tool, ToolResult
@@ -214,35 +213,10 @@ async def agentic_answer(
     else:
         decomposition = decomp_result.data or {}
 
-    # Step 1: Plan search
-    plan_start = time.perf_counter()
-    plan_result = await plan_search(query, decomposition, llm_client, model)
-    plan_duration = time.perf_counter() - plan_start
+    # Deterministic search plan derived directly from subqueries
+    plan_result = build_initial_plan(query, decomposition, max_tool_calls=max_tool_calls)
     
-    steps.append(AgenticStep(
-        step_number=len(steps),
-        name="Plan Search",
-        kind="plan",
-        duration_seconds=plan_duration,
-        details=_llm_step_details(
-            _plan_to_summary(plan_result) if plan_result.success else None,
-            plan_result,
-        ),
-        error=plan_result.error if not plan_result.success else None,
-    ))
-    
-    if not plan_result.success or not plan_result.subquery_plans:
-        plan_result = PlanResult(
-            success=True,
-            subquery_plans=_fallback_subquery_plans(decomposition, query),
-            max_tool_calls=max_tool_calls,
-            prompt=plan_result.prompt,
-            prompt_messages=plan_result.prompt_messages,
-            raw_response=plan_result.raw_response,
-            error=plan_result.error,
-        )
-    
-    effective_max_calls = min(max_tool_calls, plan_result.max_tool_calls or 5)
+    effective_max_calls = plan_result.max_tool_calls or max_tool_calls
     for subplan in plan_result.subquery_plans:
         base_queries = subplan.initial_queries or [subplan.subquery or query]
         subplan.initial_queries = _augmented_initial_queries(
@@ -587,39 +561,10 @@ async def stream_agentic_answer(
     else:
         decomposition = decomp_result.data or {}
 
-    # Step 1: Plan search
-    plan_step_num = len(steps)
-    plan_start = time.perf_counter()
-    yield _emit_step(AgenticStep(plan_step_num, "Plan Search", "plan"), "started")
+    # Deterministic search plan derived directly from subqueries
+    plan_result = build_initial_plan(query, decomposition, max_tool_calls=max_tool_calls)
     
-    plan_result = await plan_search(query, decomposition, llm_client, model)
-    plan_duration = time.perf_counter() - plan_start
-    
-    step = AgenticStep(
-        step_number=plan_step_num,
-        name="Plan Search",
-        kind="plan",
-        duration_seconds=plan_duration,
-        details=_llm_step_details(
-            _plan_to_summary(plan_result) if plan_result.success else None,
-            plan_result,
-        ),
-    )
-    steps.append(step)
-    yield _emit_step(step)
-    
-    if not plan_result.success or not plan_result.subquery_plans:
-        plan_result = PlanResult(
-            success=True,
-            subquery_plans=_fallback_subquery_plans(decomposition, query),
-            max_tool_calls=max_tool_calls,
-            prompt=plan_result.prompt,
-            prompt_messages=plan_result.prompt_messages,
-            raw_response=plan_result.raw_response,
-            error=plan_result.error,
-        )
-    
-    effective_max_calls = min(max_tool_calls, plan_result.max_tool_calls or 5)
+    effective_max_calls = plan_result.max_tool_calls or max_tool_calls
     for subplan in plan_result.subquery_plans:
         base_queries = subplan.initial_queries or [subplan.subquery or query]
         subplan.initial_queries = _augmented_initial_queries(
@@ -1136,60 +1081,6 @@ def _inspector_hits_to_evidence(hits: List[Dict[str, Any]]) -> List[Dict[str, An
             "match_type": "inspector",
         })
     return evidence
-
-
-def _plan_to_summary(plan_result: Optional[PlanResult]) -> Optional[Dict[str, Any]]:
-    if not plan_result or not plan_result.subquery_plans:
-        return None
-    return {
-        "subquery_plans": [
-            {
-                "subquery": sp.subquery,
-                "strategy": sp.strategy,
-                "initial_queries": sp.initial_queries,
-            }
-            for sp in plan_result.subquery_plans
-        ],
-        "max_tool_calls": plan_result.max_tool_calls,
-    }
-
-
-def _decomposition_subqueries(
-    decomposition: Optional[Dict[str, Any]],
-    fallback_query: str,
-) -> List[str]:
-    if isinstance(decomposition, dict):
-        items = decomposition.get("subqueries")
-        if isinstance(items, list) and items:
-            results: List[str] = []
-            for entry in items:
-                if isinstance(entry, dict):
-                    text = entry.get("query")
-                else:
-                    text = entry
-                text = (text or "").strip()
-                if text:
-                    results.append(text)
-            if results:
-                return results
-    fallback = fallback_query.strip()
-    return [fallback] if fallback else [fallback_query]
-
-
-def _fallback_subquery_plans(
-    decomposition: Optional[Dict[str, Any]],
-    query: str,
-) -> List[SubqueryPlan]:
-    subqueries = _decomposition_subqueries(decomposition, query)
-    plans: List[SubqueryPlan] = []
-    for subquery in subqueries:
-        text = subquery.strip() or query
-        plans.append(SubqueryPlan(
-            subquery=text,
-            strategy="hybrid",
-            initial_queries=[text],
-        ))
-    return plans
 
 
 def _prioritize_full_doc_evidence(evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

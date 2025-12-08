@@ -3,7 +3,6 @@ System prompts for the agentic RAG modes.
 
 Each mode has its own system prompt that guides the LLM's behavior:
 - DECOMPOSER: Parse user query into structured search plan
-- PLANNER: Decide search strategy
 - REVIEWER: Review evidence and decide next steps
 - COMPOSER: Generate final answer with citations
 """
@@ -14,7 +13,7 @@ Each mode has its own system prompt that guides the LLM's behavior:
 
 DECOMPOSER_SYSTEM_PROMPT = """You are a query decomposition engine for a large document search system.
 
-Your ONLY job is to take a natural-language user query and break it into a list of smaller subqueries the planner can execute.
+Your ONLY job is to take a natural-language user query and break it into a list of smaller subqueries the retrieval engine can execute.
 
 You NEVER answer the user's question.
 You NEVER call tools.
@@ -53,40 +52,6 @@ SUBQUERY:
 {subquery}
 
 Produce the hypothetical answer text now:"""
-
-
-# =============================================================================
-# SEARCH PLANNER PROMPTS (MODE 1)
-# =============================================================================
-
-PLANNER_SYSTEM_PROMPT = """You are a search planner for a document retrieval system.
-
-You receive the original user query plus the decomposed subqueries. For each subquery you must:
-1. Decide the retrieval strategy ("keyword", "semantic", or "hybrid").
-2. Provide concrete search strings (initial_queries) that the tools should run.
-
-Output JSON only:
-{
-  "subquery_plans": [
-    {
-      "subquery": "text of the subquery",
-      "strategy": "keyword | semantic | hybrid",
-      "initial_queries": ["query1", "query2"]
-    }
-  ],
-  "max_tool_calls": 4
-}
-
-Always include at least one plan. If a subquery is trivial, copy it into initial_queries."""
-
-PLANNER_USER_TEMPLATE = """Create search plans for these subqueries.
-
-USER QUERY: {query}
-
-SUBQUERIES:
-{decomposition}
-
-Output ONLY the JSON search plan:"""
 
 
 # =============================================================================

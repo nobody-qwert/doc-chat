@@ -1,11 +1,11 @@
 """
 LLM modes for the agentic RAG system.
 
-Implements the three conceptual modes:
+Implements the agentic helpers:
 - decompose_query: Parse user query into structured plan
-- plan_search: Mode 1 - Decide search strategy
-- review_evidence: Mode 2 - Decide if evidence is sufficient
-- compose_answer: Mode 3 - Generate final answer with citations
+- build_initial_plan: Deterministic hybrid search plan builder
+- review_evidence: Decide if evidence is sufficient
+- compose_answer: Generate final answer with citations
 """
 
 from __future__ import annotations
@@ -20,8 +20,6 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Awaitable, Callabl
 from .prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     DECOMPOSER_USER_TEMPLATE,
-    PLANNER_SYSTEM_PROMPT,
-    PLANNER_USER_TEMPLATE,
     REVIEWER_SYSTEM_PROMPT,
     REVIEWER_USER_TEMPLATE,
     COMPOSER_SYSTEM_PROMPT,
@@ -297,81 +295,20 @@ async def decompose_query(
         )
 
 
-async def plan_search(
+def build_initial_plan(
     query: str,
     decomposition: Dict[str, Any],
-    llm_client: Any,
-    model: str,
-    temperature: float = 0.1,
+    max_tool_calls: int = 4,
 ) -> PlanResult:
-    """
-    Generate retrieval instructions for each decomposed subquery.
-    
-    Mode 1: Selects search strategy, initial queries, and filters
-    for every subquery produced by the decomposer.
-    """
-    user_prompt = None
-    prompt_messages: Optional[List[Dict[str, str]]] = None
+    """Create a deterministic hybrid search plan for each subquery."""
     subqueries = _extract_subqueries(decomposition, query)
-    subquery_payload = decomposition.get("subqueries")
-    if not isinstance(subquery_payload, list) or not subquery_payload:
-        subquery_payload = [{"query": sq} for sq in subqueries]
-    try:
-        decomp_str = json.dumps(subquery_payload, indent=2)
-        user_prompt = PLANNER_USER_TEMPLATE.format(
-            query=query,
-            decomposition=decomp_str,
-        )
-        prompt_messages = [
-            {"role": "system", "content": PLANNER_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
-        
-        response = await llm_client.chat.completions.create(
-            model=model,
-            messages=prompt_messages,
-            temperature=temperature,
-            max_tokens=500,
-        )
-        
-        if not response.choices:
-            return PlanResult(
-                success=False,
-                error="LLM returned no choices",
-            )
-        
-        raw_response = response.choices[0].message.content or ""
-        data = _extract_json(raw_response)
-        
-        if not data:
-            # Fall back to default behavior
-            return PlanResult(
-                success=True,
-                subquery_plans=_default_subquery_plans(subqueries),
-                max_tool_calls=4,
-                raw_response=raw_response,
-                prompt=user_prompt,
-                prompt_messages=prompt_messages,
-            )
-        
-        plans = _build_subquery_plans(data.get("subquery_plans"), subqueries)
-        return PlanResult(
-            success=True,
-            subquery_plans=plans,
-            max_tool_calls=data.get("max_tool_calls", 4),
-            raw_response=raw_response,
-            prompt=user_prompt,
-            prompt_messages=prompt_messages,
-        )
-
-    except Exception as e:
-        logger.exception(f"plan_search failed: {e}")
-        return PlanResult(
-            success=False,
-            error=str(e),
-            prompt=user_prompt,
-            prompt_messages=prompt_messages,
-        )
+    plans = _default_subquery_plans(subqueries)
+    safe_max_calls = max(1, int(max_tool_calls or 4))
+    return PlanResult(
+        success=True,
+        subquery_plans=plans,
+        max_tool_calls=safe_max_calls,
+    )
 
 
 async def rewrite_semantic_query(
