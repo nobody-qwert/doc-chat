@@ -111,9 +111,8 @@ async def agentic_answer(
         tool_name: str,
         tool_args: Dict[str, Any],
         display_name: Optional[str] = None,
-        allow_fallback: bool = True,
     ) -> Optional[ToolResult]:
-        """Execute a tool, record the step, and optionally trigger fallback search."""
+        """Execute a tool and record the step."""
         nonlocal total_tool_calls, evidence, steps
         if total_tool_calls >= effective_max_calls:
             return None
@@ -169,27 +168,7 @@ async def agentic_answer(
         if result.success:
             evidence.extend(result.results)
         
-        if allow_fallback:
-            await _run_fallback_if_needed(tool_name, args, label, result)
         return result
-    
-    async def _run_fallback_if_needed(
-        primary_tool: str,
-        primary_args: Dict[str, Any],
-        primary_label: str,
-        primary_result: Optional[ToolResult],
-    ) -> None:
-        """Automatically invoke the complementary search mode when no hits were found."""
-        nonlocal total_tool_calls
-        if not _should_trigger_fallback(primary_result):
-            return
-        fallback_tool = _fallback_tool_name(primary_tool)
-        if not fallback_tool or total_tool_calls >= effective_max_calls:
-            return
-        fallback_args = dict(primary_args)
-        _ensure_context_chars(fallback_tool, fallback_args)
-        fallback_label = f"{primary_label} -> {fallback_tool}"
-        await _run_tool(fallback_tool, fallback_args, display_name=fallback_label, allow_fallback=False)
     
     # Step 0: Decompose query
     decomp_start = time.perf_counter()
@@ -461,81 +440,6 @@ async def stream_agentic_answer(
         step_dict["state"] = state
         return json.dumps({"type": "step", "step": step_dict}) + "\n"
     
-    async def _stream_fallback_if_needed(
-        primary_tool: str,
-        primary_args: Dict[str, Any],
-        primary_label: str,
-        primary_result: Optional[ToolResult],
-        step_num_ref: List[int],
-    ):
-        """Async generator that yields fallback tool events when needed."""
-        nonlocal total_tool_calls, evidence
-        if not _should_trigger_fallback(primary_result):
-            return
-        fallback_tool = _fallback_tool_name(primary_tool)
-        if not fallback_tool or total_tool_calls >= effective_max_calls:
-            return
-        args = dict(primary_args)
-        _ensure_context_chars(fallback_tool, args)
-        label = f"{primary_label} -> {fallback_tool}"
-        if fallback_tool == "search_semantic" and (args.get("query") or "").strip():
-            rewrite_label = "Enhance Semantic Query"
-            yield _emit_step(AgenticStep(step_num_ref[0], rewrite_label, "rewrite"), "started")
-            rewrite_start = time.perf_counter()
-            rewrite_result = await rewrite_semantic_query(
-                original_query=args.get("query", ""),
-                user_query=query,
-                llm_client=llm_client,
-                model=model,
-            )
-            rewrite_duration = time.perf_counter() - rewrite_start
-            rewritten_query = rewrite_result.rewritten_query or args.get("query", "")
-            args["query"] = rewritten_query
-            rewrite_step = AgenticStep(
-                step_number=step_num_ref[0],
-                name=rewrite_label,
-                kind="rewrite",
-                duration_seconds=rewrite_duration,
-                details=_llm_step_details(
-                    {
-                        "original_query": primary_args.get("query"),
-                        "rewritten_query": rewritten_query,
-                    },
-                    rewrite_result,
-                ),
-                error=rewrite_result.error if not rewrite_result.success else None,
-            )
-            steps.append(rewrite_step)
-            yield _emit_step(rewrite_step)
-            step_num_ref[0] += 1
-        
-        yield _emit_step(AgenticStep(step_num_ref[0], label, "tool"), "started")
-        tool_start = time.perf_counter()
-        result = await execute_tool(
-            tool_name=fallback_tool,
-            args=args,
-            document_store=document_store,
-            embedding_client=embedding_client,
-            embedding_cache=embedding_cache,
-            settings=settings,
-        )
-        total_tool_calls += 1
-        tool_duration = time.perf_counter() - tool_start
-        
-        step = AgenticStep(
-            step_number=step_num_ref[0],
-            name=label,
-            kind="tool",
-            duration_seconds=tool_duration,
-            details=_tool_step_details(fallback_tool, args, result),
-        )
-        steps.append(step)
-        yield _emit_step(step)
-        step_num_ref[0] += 1
-        
-        if result.success:
-            evidence.extend(result.results)
-    
     # Step 0: Decompose query
     decomp_start = time.perf_counter()
     yield _emit_step(AgenticStep(0, "Decompose Query", "decompose"), "started")
@@ -611,11 +515,6 @@ async def stream_agentic_answer(
                 
                 if text_result.success:
                     evidence.extend(text_result.results)
-                
-                counter = [step_num]
-                async for event in _stream_fallback_if_needed("search_text", args, label, text_result, counter):
-                    yield event
-                step_num = counter[0]
             
             if subplan.strategy in ("semantic", "hybrid") and total_tool_calls < effective_max_calls:
                 args = {"query": search_query, "top_k": 5}
@@ -677,11 +576,6 @@ async def stream_agentic_answer(
                 
                 if semantic_result.success:
                     evidence.extend(semantic_result.results)
-                
-                counter = [step_num]
-                async for event in _stream_fallback_if_needed("search_semantic", args, label, semantic_result, counter):
-                    yield event
-                step_num = counter[0]
     
     evidence = _deduplicate_evidence(evidence)
     
@@ -794,12 +688,6 @@ async def stream_agentic_answer(
             
             if tool_result.success:
                 evidence.extend(tool_result.results)
-            
-            counter = [step_num]
-            async for event in _stream_fallback_if_needed(tool_name, tool_args, tool_name, tool_result, counter):
-                yield event
-            step_num = counter[0]
-            
             evidence = _deduplicate_evidence(evidence)
     
     # Inspector pass
@@ -969,34 +857,6 @@ async def stream_agentic_answer(
     }) + "\n"
 
 
-def _fallback_tool_name(primary_tool: str) -> Optional[str]:
-    """Return the complementary search tool to try when no results were found."""
-    mapping = {
-        "search_text": "search_semantic",
-        "search_semantic": "search_text",
-    }
-    return mapping.get(primary_tool)
-
-
-def _should_trigger_fallback(result: Optional[ToolResult]) -> bool:
-    """Determine if a fallback search should run."""
-    if result is None:
-        return False
-    if not result.success:
-        return False
-    if result.total_found:
-        return False
-    return not result.results
-
-
-def _ensure_context_chars(tool_name: str, args: Dict[str, Any]) -> None:
-    """Set default context window sizes for fallback tool calls."""
-    if "context_chars" in args:
-        return
-    if tool_name == "search_semantic":
-        args["context_chars"] = 500
-    elif tool_name == "search_text":
-        args["context_chars"] = 400
 
 
 def _deduplicate_evidence(evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
