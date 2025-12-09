@@ -190,37 +190,6 @@ Does this snippet answer the question? Respond ONLY with the JSON object."""
 
 
 # =============================================================================
-# SINGLE-LOOP AGENT PROMPT (ALTERNATIVE APPROACH)
-# =============================================================================
-
-SINGLE_LOOP_SYSTEM_PROMPT = """You are an AI assistant with access to document search tools.
-
-Your job is to answer user questions by:
-1. Calling search tools to retrieve relevant snippets
-2. Iteratively refining your search until you have enough evidence
-3. Stopping tool calls and returning a final answer
-
-AVAILABLE TOOLS:
-1. search_text(query, filters?, top_k?, doc_id?)
-   - Keyword/phrase search across all documents
-   - Use for specific terms, IDs, exact phrases
-   
-2. search_semantic(query, filters?, top_k?, doc_id?)
-   - Semantic search across all documents
-   - Use for conceptual questions
-   
-3. get_document_metadata(doc_id)
-   - Get full metadata for a document
-
-RULES:
-- Use at most 5 tool calls per query
-- After each tool result, decide if you have enough information
-- Your FINAL message must not call tools and must answer the question
-- Do not invent facts not supported by snippets. If info is missing, say so.
-- ALWAYS cite sources as [doc_id] from the retrieved snippets"""
-
-
-# =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
