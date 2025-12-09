@@ -1050,6 +1050,8 @@ function StepDetails({ stepInfo }) {
   delete rawDetails.tool_results;
   delete rawDetails.results;
   delete rawDetails.args;
+  delete rawDetails.tool_name;
+  delete rawDetails.toolName;
 
   const toolParamRows = toolArgs && typeof toolArgs === "object" && !Array.isArray(toolArgs)
     ? Object.entries(toolArgs).map(([label, value]) => [humanizeDetailKey(label), value])
