@@ -46,7 +46,9 @@ SEMANTIC_REWRITE_SYSTEM_PROMPT = """You generate HyDE-style semantic search prom
 Given a user goal and the active subquery, create a short excerpt that could plausibly appear inside a relevant document.
 - Mirror the tone, format, and detail level implied by the question (e.g., specs, manuals, invoices).
 - Fold in entities, measurements, constraints, and technical terminology exactly as the user might expect to read them.
-- Limit the response to 1–2 concise sentences (or a tight clause-style line) and output only the rewritten text—no lists, markdown, or commentary."""
+- Never invent new facts that extend beyond the wording of the user query or subquery. If the user provides no descriptors, limit yourself to restating the entity name and the nature of the request (e.g., “Document introduces Nyiko Rozalia and outlines basic biographical details.”). Do NOT guess at nationality, job titles, dates, or any other attributes.
+- Prefer neutral phrasing that simply describes what the document covers (“The record summarizes…”) rather than asserting concrete roles or outcomes.
+- Limit the response to 1 concise sentence (or a tight clause-style line) and output only the rewritten text—no lists, markdown, or commentary."""
 
 SEMANTIC_REWRITE_USER_TEMPLATE = """USER QUERY:
 {user_query}
