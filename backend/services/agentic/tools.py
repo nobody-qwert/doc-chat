@@ -86,7 +86,6 @@ async def search_text(
 
         short_doc_results: List[Dict[str, Any]] = []
         long_doc_hits: List[Dict[str, Any]] = []
-        long_docs_needing_semantic: List[str] = []
         
         for doc_hash in matching_doc_hashes:
             chunks = await document_store.fetch_chunks(doc_hash=doc_hash)
@@ -132,8 +131,6 @@ async def search_text(
             )
             if hits:
                 long_doc_hits.extend(hits)
-            else:
-                long_docs_needing_semantic.append(doc_hash)
         
         long_doc_hits.sort(key=lambda x: x["score"], reverse=True)
         long_doc_hits = long_doc_hits[:max(top_k, 50)]
@@ -151,20 +148,7 @@ async def search_text(
             max_chars=_expansion_char_limit(context_chars),
         )
         
-        semantic_supplement: List[Dict[str, Any]] = []
-        if long_docs_needing_semantic:
-            semantic_supplement = await _semantic_doc_supplement(
-                query=query,
-                doc_hashes=long_docs_needing_semantic[:max(top_k, 5)],
-                document_store=document_store,
-                embedding_client=embedding_client,
-                embedding_cache=embedding_cache,
-                settings=settings,
-                per_doc_top=min(3, top_k),
-                context_chars=_expansion_char_limit(context_chars),
-            )
-        
-        combined_results = short_doc_results + expanded_long_hits + semantic_supplement
+        combined_results = short_doc_results + expanded_long_hits
         combined_results = [
             item for item in combined_results
             if float(item.get("score", 0.0)) >= keyword_threshold
@@ -259,9 +243,13 @@ async def search_semantic(
         
         # Compute similarities
         scores = snapshot.matrix @ query_vec
+
+        requested_top_k = int(top_k or 1)
+        max_hits = max(1, min(requested_top_k, 10))
+        min_similarity = float(getattr(settings, "min_semantic_similarity", 0.0))
         
         # Get top candidates
-        candidate_count = min(snapshot.total, top_k * 5)  # Fetch extra for filtering
+        candidate_count = min(snapshot.total, max_hits * 5)  # Fetch extra for filtering
         if candidate_count > 0:
             top_indices = np.argpartition(scores, -candidate_count)[-candidate_count:]
             top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
@@ -273,6 +261,8 @@ async def search_semantic(
         for idx in top_indices:
             chunk_id = snapshot.chunk_ids[idx]
             score = float(scores[idx])
+            if score < min_similarity:
+                break
             
             # Get chunk info
             chunks = await document_store.fetch_chunks_by_ids([chunk_id])
@@ -298,15 +288,11 @@ async def search_semantic(
                 "match_type": "semantic",
             })
             
-            if len(results) >= top_k:
+            if len(results) >= max_hits:
                 break
         
-        filtered_results = [
-            item for item in results
-            if float(item.get("score", 0.0)) >= getattr(settings, "min_semantic_similarity", 0.0)
-        ]
         results = await _expand_evidence_chunks(
-            filtered_results,
+            results,
             document_store=document_store,
             doc_chunks_cache=doc_chunks_cache,
             settings=settings,
@@ -662,42 +648,6 @@ def _score_chunks_for_doc(
             "match_type": "keyword",
         })
     return scores
-
-
-async def _semantic_doc_supplement(
-    query: str,
-    doc_hashes: List[str],
-    document_store: Any,
-    embedding_client: Any,
-    embedding_cache: Any,
-    settings: Any,
-    per_doc_top: int,
-    context_chars: int,
-) -> List[Dict[str, Any]]:
-    """Run semantic search scoped to specific documents to provide fallback hits."""
-    if not embedding_client or not embedding_cache:
-        return []
-    supplements: List[Dict[str, Any]] = []
-    for doc_hash in doc_hashes:
-        semantic_result = await search_semantic(
-            query=query,
-            document_store=document_store,
-            embedding_client=embedding_client,
-            embedding_cache=embedding_cache,
-            settings=settings,
-            top_k=per_doc_top,
-            context_chars=context_chars,
-            doc_id=doc_hash,
-        )
-        if not semantic_result.success or not semantic_result.results:
-            continue
-        for item in semantic_result.results:
-            new_item = dict(item)
-            new_item["match_type"] = (item.get("match_type") or "semantic") + "_fallback"
-            supplements.append(new_item)
-        if len(supplements) >= per_doc_top * len(doc_hashes):
-            break
-    return supplements
 
 
 def _join_chunk_texts(chunks: List[Dict[str, Any]], max_chars: int) -> str:
