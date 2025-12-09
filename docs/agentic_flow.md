@@ -12,8 +12,8 @@ flowchart TD
     DQ --> BP["build_initial_plan()"]
     BP --> LOOP{{"for each SubqueryPlan"}}
 
-    LOOP -->|keyword or hybrid| ST["execute_tool('search_text')"]
-    LOOP -->|semantic or hybrid| RW["rewrite_semantic_query()"]
+    LOOP --> ST["execute_tool('search_text')"]
+    LOOP --> RW["rewrite_semantic_query()"]
     RW --> SS["execute_tool('search_semantic')"]
     
     ST --> SUBE["Subquery evidence"]
@@ -41,10 +41,10 @@ flowchart TD
 
 - **Request intake (`backend/routes/agentic.py`)** – `ask_agentic_stream()` accepts `POST /ask/agentic/stream`, trims the query, ensures processed documents exist, waits for the GPU-phase gate, and instantiates `AsyncOpenAI` plus the local `EmbeddingClient`. It then yields the `StreamingResponse` produced by `stream_agentic_answer()`. Every transport frame is NDJSON with `type: "step"`, `"token"`, or `"final"`.
 - **Decomposition & deterministic planning** – `stream_agentic_answer()` immediately calls `decompose_query()` (LLM-driven) and records the response as `AgenticStep` zero. When decomposition fails, it falls back to a single `{ "subqueries": [{"query": query}] }` structure. `build_initial_plan()` (pure Python) converts the decomposition into `SubqueryPlan` objects, caps the count to `max_subqueries`, and guarantees each plan has at least one `initial_queries` entry so downstream search has a deterministic input.
-- **Retrieval per `SubqueryPlan`** – For each plan the orchestrator issues at most one keyword call and one semantic call:
-  - `execute_tool("search_text")` (top_k=5) runs whenever the plan strategy is `keyword` or `hybrid`. Results append directly to the main evidence buffer so they can influence later stages.
-  - `rewrite_semantic_query()` rewrites the current subquery before calling `execute_tool("search_semantic")` for strategies `semantic`/`hybrid`. The rewrite step is logged as its own `AgenticStep`.
-  Every tool call emits a progress step that includes the request args, counts, and a short preview of the top hits. Tools are only ever invoked through the dispatcher in `backend/services/agentic/tools.py`.
+- **Retrieval per `SubqueryPlan`** – Because `_default_subquery_plans()` always emits `strategy="hybrid"` entries today, the orchestrator runs the same pair of tools for every subquery:
+  - `execute_tool("search_text")` (top_k=5) executes first and appends results directly to the evidence buffer.
+  - `rewrite_semantic_query()` rewrites the subquery and immediately invokes `execute_tool("search_semantic")`. The rewrite emits its own `AgenticStep` before the semantic tool runs.
+  The strategy checks still exist in the code, but until another planner is introduced every plan follows this keyword→semantic sequence. Each tool call emits a progress step that includes the request args, counts, and a preview of the top hits. Tools are only ever invoked through the dispatcher in `backend/services/agentic/tools.py`.
 - **Context expansion & evidence hygiene** – Both search tools share the same expansion helpers:
   - Short documents (`token_count ≤ 12k` or ≤20 chunks) are surfaced as one `chunk_id ::full_doc` evidence item with the entire text.
   - Long-document hits get re-expanded into ±10-chunk windows (capped at 20 chunks or ~15k characters) so the inspector/composer can see neighboring paragraphs.
