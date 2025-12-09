@@ -4,7 +4,6 @@ LLM modes for the agentic RAG system.
 Implements the agentic helpers:
 - decompose_query: Parse user query into structured plan
 - build_initial_plan: Deterministic hybrid search plan builder
-- review_evidence: Decide if evidence is sufficient
 - compose_answer: Generate final answer with citations
 """
 
@@ -20,15 +19,12 @@ from typing import Any, AsyncGenerator, Dict, List, Optional, Awaitable, Callabl
 from .prompts import (
     DECOMPOSER_SYSTEM_PROMPT,
     DECOMPOSER_USER_TEMPLATE,
-    REVIEWER_SYSTEM_PROMPT,
-    REVIEWER_USER_TEMPLATE,
     COMPOSER_SYSTEM_PROMPT,
     COMPOSER_USER_TEMPLATE,
     COMPOSER_NO_EVIDENCE_SYSTEM_PROMPT,
     COMPOSER_NO_EVIDENCE_USER_TEMPLATE,
     SEMANTIC_REWRITE_SYSTEM_PROMPT,
     SEMANTIC_REWRITE_USER_TEMPLATE,
-    format_evidence_for_review,
     format_evidence_for_composer,
     INSPECTOR_SYSTEM_PROMPT,
     INSPECTOR_USER_TEMPLATE,
@@ -62,20 +58,6 @@ class PlanResult:
     success: bool
     subquery_plans: List[SubqueryPlan] = field(default_factory=list)
     max_subqueries: int = 5
-    error: Optional[str] = None
-    raw_response: Optional[str] = None
-    prompt: Optional[str] = None
-    prompt_messages: Optional[List[Dict[str, str]]] = None
-
-
-@dataclass
-class ReviewResult:
-    """Result from evidence review."""
-    success: bool
-    status: str = "more"  # "enough", "more", "clarify"
-    reason: str = ""
-    next_tool_call: Optional[Dict[str, Any]] = None
-    clarification_details: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     raw_response: Optional[str] = None
     prompt: Optional[str] = None
@@ -373,89 +355,6 @@ async def rewrite_semantic_query(
         return QueryRewriteResult(
             success=False,
             rewritten_query=normalized_original,
-            error=str(e),
-            prompt=user_prompt,
-            prompt_messages=prompt_messages,
-        )
-
-
-async def review_evidence(
-    query: str,
-    plan: PlanResult,
-    evidence: List[Dict[str, Any]],
-    llm_client: Any,
-    model: str,
-    temperature: float = 0.1,
-) -> ReviewResult:
-    """
-    Review collected evidence and decide next step.
-    
-    Mode 2: Decides if we have enough evidence, need more searches,
-    or need to ask for clarification.
-    """
-    user_prompt = None
-    prompt_messages: Optional[List[Dict[str, str]]] = None
-    try:
-        plan_str = json.dumps({
-            "subquery_plans": [_subplan_to_dict(p) for p in plan.subquery_plans],
-            "max_subqueries": plan.max_subqueries,
-        }, indent=2)
-        
-        evidence_summary = format_evidence_for_review(evidence)
-        
-        user_prompt = REVIEWER_USER_TEMPLATE.format(
-            query=query,
-            plan=plan_str,
-            evidence_count=len(evidence),
-            evidence_summary=evidence_summary,
-        )
-        prompt_messages = [
-            {"role": "system", "content": REVIEWER_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ]
-        
-        response = await llm_client.chat.completions.create(
-            model=model,
-            messages=prompt_messages,
-            temperature=temperature,
-            max_tokens=500,
-        )
-        
-        if not response.choices:
-            return ReviewResult(
-                success=False,
-                error="LLM returned no choices",
-            )
-        
-        raw_response = response.choices[0].message.content or ""
-        data = _extract_json(raw_response)
-        
-        if not data:
-            # Default to "enough" if we have evidence, otherwise "more"
-            return ReviewResult(
-                success=True,
-                status="enough" if evidence else "more",
-                reason="Could not parse reviewer response",
-                raw_response=raw_response,
-                prompt=user_prompt,
-                prompt_messages=prompt_messages,
-            )
-        
-        return ReviewResult(
-            success=True,
-            status=data.get("status", "enough"),
-            reason=data.get("reason", ""),
-            next_tool_call=data.get("next_tool_call"),
-            clarification_details=data.get("clarification_details"),
-            raw_response=raw_response,
-            prompt=user_prompt,
-            prompt_messages=prompt_messages,
-        )
-        
-    except Exception as e:
-        logger.exception(f"review_evidence failed: {e}")
-        return ReviewResult(
-            success=False,
             error=str(e),
             prompt=user_prompt,
             prompt_messages=prompt_messages,

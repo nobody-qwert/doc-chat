@@ -34,7 +34,7 @@ class AgenticStep:
     """Record of a single step in the agentic loop."""
     step_number: int
     name: str
-    kind: str  # "decompose", "plan", "review", "tool", "compose"
+    kind: str  # "decompose", "plan", "tool", "rewrite", "inspect", "compose"
     duration_seconds: float = 0.0
     state: str = "done"  # "started", "done", "error"
     details: Optional[Dict[str, Any]] = None
@@ -152,7 +152,7 @@ async def stream_agentic_answer(
                     subquery_evidence.extend(text_result.results)
             
             if subplan.strategy in ("semantic", "hybrid"):
-                args = {"query": search_query, "top_k": 5}
+                args = {"query": search_query, "top_k": 10}
                 if (search_query or "").strip():
                     rewrite_label = "Enhance Semantic Query"
                     yield _emit_step(AgenticStep(step_num, rewrite_label, "rewrite"), "started")

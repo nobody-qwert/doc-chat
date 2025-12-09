@@ -3,8 +3,9 @@ System prompts for the agentic RAG modes.
 
 Each mode has its own system prompt that guides the LLM's behavior:
 - DECOMPOSER: Parse user query into structured search plan
-- REVIEWER: Review evidence and decide next steps
 - COMPOSER: Generate final answer with citations
+- INSPECTOR: Decide if one snippet fully answers the query
+- SEMANTIC REWRITE: Generate HyDE-style search prompts
 """
 
 # =============================================================================
@@ -143,23 +144,6 @@ Does this snippet answer the question? Respond ONLY with the JSON object."""
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
-
-def format_evidence_for_review(evidence_items: list, max_chars_per_item: int = 300) -> str:
-    """Format evidence items for the reviewer prompt."""
-    if not evidence_items:
-        return "(No evidence collected yet)"
-    
-    lines = []
-    for i, item in enumerate(evidence_items, 1):
-        doc_id = item.get("doc_hash", item.get("doc_id", "unknown"))
-        text = item.get("text", item.get("content", ""))[:max_chars_per_item]
-        score = item.get("score", "N/A")
-        lines.append(f"[{i}] doc_id={doc_id} (score={score})")
-        lines.append(f"    {text}...")
-        lines.append("")
-    
-    return "\n".join(lines)
-
 
 def format_evidence_for_composer(evidence_items: list, max_chars_per_item: int = 500) -> str:
     """Format evidence items for the composer prompt."""
