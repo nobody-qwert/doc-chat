@@ -727,7 +727,16 @@ def _tool_step_details(tool_name: str, tool_args: Dict[str, Any], result: ToolRe
         "tool_args": tool_args,
         "tool_return_count": result.total_found,
     }
-    summary = _summarize_tool_results(result.results)
+    summary_limit = 3
+    top_k_arg = tool_args.get("top_k")
+    if top_k_arg is not None:
+        try:
+            parsed_top_k = int(top_k_arg)
+        except (TypeError, ValueError):
+            parsed_top_k = None
+        if parsed_top_k:
+            summary_limit = max(1, min(parsed_top_k, 10))
+    summary = _summarize_tool_results(result.results, limit=summary_limit)
     if summary:
         details["tool_results"] = summary
     if result.error:
