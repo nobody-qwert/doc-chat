@@ -119,99 +119,97 @@ async def stream_agentic_answer(
         subquery_evidence: List[Dict[str, Any]] = []
         search_queries = [primary_query]
         for search_query in search_queries:
-            if subplan.strategy in ("keyword", "hybrid"):
-                label = "search_text"
-                args = {"query": search_query, "top_k": 5}
-                yield _emit_step(AgenticStep(step_num, label, "tool"), "started")
-                tool_start = time.perf_counter()
-                
-                text_result = await execute_tool(
-                    tool_name="search_text",
-                    args=args,
-                    document_store=document_store,
-                    embedding_client=embedding_client,
-                    embedding_cache=embedding_cache,
-                    settings=settings,
-                )
-                total_tool_calls += 1
-                tool_duration = time.perf_counter() - tool_start
-                
-                step = AgenticStep(
-                    step_number=step_num,
-                    name=label,
-                    kind="tool",
-                    duration_seconds=tool_duration,
-                    details=_tool_step_details("search_text", args, text_result),
-                )
-                steps.append(step)
-                yield _emit_step(step)
-                step_num += 1
-                
-                if text_result.success:
-                    evidence.extend(text_result.results)
-                    subquery_evidence.extend(text_result.results)
+            label = "search_text"
+            args = {"query": search_query, "top_k": 5}
+            yield _emit_step(AgenticStep(step_num, label, "tool"), "started")
+            tool_start = time.perf_counter()
             
-            if subplan.strategy in ("semantic", "hybrid"):
-                args = {"query": search_query, "top_k": 10}
-                if (search_query or "").strip():
-                    rewrite_label = "Enhance Semantic Query"
-                    yield _emit_step(AgenticStep(step_num, rewrite_label, "rewrite"), "started")
-                    rewrite_start = time.perf_counter()
-                    rewrite_result = await rewrite_semantic_query(
-                        original_query=search_query,
-                        user_query=query,
-                        llm_client=llm_client,
-                        model=model,
-                    )
-                    rewrite_duration = time.perf_counter() - rewrite_start
-                    rewritten_query = rewrite_result.rewritten_query or search_query
-                    args["query"] = rewritten_query
-                    rewrite_step = AgenticStep(
-                        step_number=step_num,
-                        name=rewrite_label,
-                        kind="rewrite",
-                        duration_seconds=rewrite_duration,
-                        details=_llm_step_details(
-                            {
-                                "original_query": search_query,
-                                "rewritten_query": rewritten_query,
-                            },
-                            rewrite_result,
-                        ),
-                        error=rewrite_result.error if not rewrite_result.success else None,
-                    )
-                    steps.append(rewrite_step)
-                    yield _emit_step(rewrite_step)
-                    step_num += 1
-                label = "search_semantic"
-                yield _emit_step(AgenticStep(step_num, label, "tool"), "started")
-                tool_start = time.perf_counter()
-                
-                semantic_result = await execute_tool(
-                    tool_name="search_semantic",
-                    args=args,
-                    document_store=document_store,
-                    embedding_client=embedding_client,
-                    embedding_cache=embedding_cache,
-                    settings=settings,
+            text_result = await execute_tool(
+                tool_name="search_text",
+                args=args,
+                document_store=document_store,
+                embedding_client=embedding_client,
+                embedding_cache=embedding_cache,
+                settings=settings,
+            )
+            total_tool_calls += 1
+            tool_duration = time.perf_counter() - tool_start
+            
+            step = AgenticStep(
+                step_number=step_num,
+                name=label,
+                kind="tool",
+                duration_seconds=tool_duration,
+                details=_tool_step_details("search_text", args, text_result),
+            )
+            steps.append(step)
+            yield _emit_step(step)
+            step_num += 1
+            
+            if text_result.success:
+                evidence.extend(text_result.results)
+                subquery_evidence.extend(text_result.results)
+        
+            args = {"query": search_query, "top_k": 10}
+            if (search_query or "").strip():
+                rewrite_label = "Enhance Semantic Query"
+                yield _emit_step(AgenticStep(step_num, rewrite_label, "rewrite"), "started")
+                rewrite_start = time.perf_counter()
+                rewrite_result = await rewrite_semantic_query(
+                    original_query=search_query,
+                    user_query=query,
+                    llm_client=llm_client,
+                    model=model,
                 )
-                total_tool_calls += 1
-                tool_duration = time.perf_counter() - tool_start
-                
-                step = AgenticStep(
+                rewrite_duration = time.perf_counter() - rewrite_start
+                rewritten_query = rewrite_result.rewritten_query or search_query
+                args["query"] = rewritten_query
+                rewrite_step = AgenticStep(
                     step_number=step_num,
-                    name=label,
-                    kind="tool",
-                    duration_seconds=tool_duration,
-                    details=_tool_step_details("search_semantic", args, semantic_result),
+                    name=rewrite_label,
+                    kind="rewrite",
+                    duration_seconds=rewrite_duration,
+                    details=_llm_step_details(
+                        {
+                            "original_query": search_query,
+                            "rewritten_query": rewritten_query,
+                        },
+                        rewrite_result,
+                    ),
+                    error=rewrite_result.error if not rewrite_result.success else None,
                 )
-                steps.append(step)
-                yield _emit_step(step)
+                steps.append(rewrite_step)
+                yield _emit_step(rewrite_step)
                 step_num += 1
-                
-                if semantic_result.success:
-                    evidence.extend(semantic_result.results)
-                    subquery_evidence.extend(semantic_result.results)
+            label = "search_semantic"
+            yield _emit_step(AgenticStep(step_num, label, "tool"), "started")
+            tool_start = time.perf_counter()
+            
+            semantic_result = await execute_tool(
+                tool_name="search_semantic",
+                args=args,
+                document_store=document_store,
+                embedding_client=embedding_client,
+                embedding_cache=embedding_cache,
+                settings=settings,
+            )
+            total_tool_calls += 1
+            tool_duration = time.perf_counter() - tool_start
+            
+            step = AgenticStep(
+                step_number=step_num,
+                name=label,
+                kind="tool",
+                duration_seconds=tool_duration,
+                details=_tool_step_details("search_semantic", args, semantic_result),
+            )
+            steps.append(step)
+            yield _emit_step(step)
+            step_num += 1
+            
+            if semantic_result.success:
+                evidence.extend(semantic_result.results)
+                subquery_evidence.extend(semantic_result.results)
         
         if not subquery_evidence:
             continue

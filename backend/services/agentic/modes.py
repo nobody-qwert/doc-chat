@@ -48,7 +48,6 @@ class DecompositionResult:
 @dataclass
 class SubqueryPlan:
     subquery: str
-    strategy: str = "hybrid"
     initial_queries: List[str] = field(default_factory=list)
 
 
@@ -179,13 +178,11 @@ def _build_subquery_plans(
             subquery = (entry.get("subquery") or "").strip()
             if not subquery:
                 continue
-            strategy = entry.get("strategy", "hybrid")
             initial_queries = entry.get("initial_queries")
             if not isinstance(initial_queries, list) or not initial_queries:
                 initial_queries = [subquery]
             plans.append(SubqueryPlan(
                 subquery=subquery,
-                strategy=str(strategy or "hybrid").lower(),
                 initial_queries=[str(q).strip() for q in initial_queries if str(q).strip()],
             ))
     if not plans:
@@ -199,7 +196,6 @@ def _default_subquery_plans(subqueries: List[str]) -> List[SubqueryPlan]:
         text = subquery.strip() or "general search"
         plans.append(SubqueryPlan(
             subquery=text,
-            strategy="hybrid",
             initial_queries=[text],
         ))
     return plans
@@ -208,7 +204,6 @@ def _default_subquery_plans(subqueries: List[str]) -> List[SubqueryPlan]:
 def _subplan_to_dict(plan: SubqueryPlan) -> Dict[str, Any]:
     return {
         "subquery": plan.subquery,
-        "strategy": plan.strategy,
         "initial_queries": plan.initial_queries,
     }
 
