@@ -11,4 +11,11 @@ tell me 550W solar panel dimensions. i need width and height
 
 tell me 550W solar panel dimensions
 
+
 tell me Laszlo Marias electricity and natural gas consumption bills. i need the period for each bill and the paid value.
+
+
+who is Ion Iliescu 
+
+
+i need LAszlo maria's electricity and nat gas bills. i need each bills period and the corresponding total paid. total plata in romaneste
