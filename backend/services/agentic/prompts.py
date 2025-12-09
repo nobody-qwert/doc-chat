@@ -116,7 +116,7 @@ No evidence was retrieved from the document set. Explain that the answer cannot 
 
 INSPECTOR_SYSTEM_PROMPT = """You are a fact extraction agent.
 
-You are given the user's question and a single document snippet (which may be the whole document).
+You are given the user's question and a single document snippet.
 
 Your job:
 1. Decide if the snippet contains enough information to answer the question.
@@ -126,7 +126,7 @@ STRICT RULES:
 - Output exactly one JSON object with schema:
   {
     "found": true | false,
-    "quote": "direct quote from the snippet"
+    "quote": "concise answer grounded in the snippet, including necessary context (e.g. entity name)"
   }
 - If the snippet does not contain the required information, set found=false and leave other fields empty or defaults.
 - Never invent information not present in the snippet.
