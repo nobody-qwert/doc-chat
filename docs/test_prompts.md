@@ -11,4 +11,4 @@ tell me 550W solar panel dimensions. i need width and height
 
 tell me 550W solar panel dimensions
 
-
+tell me Laszlo Marias electricity and natural gas consumption bills. i need the period for each bill and the paid value.

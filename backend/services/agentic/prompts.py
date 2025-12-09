@@ -152,16 +152,12 @@ def format_evidence_for_composer(evidence_items: list, max_chars_per_item: int =
     
     lines = []
     for i, item in enumerate(evidence_items, 1):
-        doc_id = item.get("doc_hash", item.get("doc_id", "unknown"))
         citation_id = str(item.get("citation_id") or i)
-        doc_name = item.get("document_name", item.get("original_name", "Unknown Document"))
         text = item.get("text", item.get("content", ""))[:max_chars_per_item]
-        
+
         lines.append(f"--- Source [{citation_id}] ---")
         lines.append(f"citation_id: {citation_id}")
-        lines.append(f"doc_hash: {doc_id}")
-        lines.append(f"document: {doc_name}")
-        lines.append(f"content: {text}")
+        lines.append(text)
         lines.append("")
     
     return "\n".join(lines)
