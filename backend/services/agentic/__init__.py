@@ -14,9 +14,8 @@ Components:
 - prompts: System prompts for each mode
 """
 
-from .orchestrator import agentic_answer, stream_agentic_answer
+from .orchestrator import stream_agentic_answer
 
 __all__ = [
-    "agentic_answer",
     "stream_agentic_answer",
 ]
