@@ -21,9 +21,10 @@ You ONLY output one JSON object matching the required schema.
 
 STRICT RULES:
 - Emit the MINIMUM number of subqueries needed to cover distinct requirements in the user request.
-- If the question targets a single entity or task (e.g., "Who is Nyiko Rozalia?"), output a single subquery identical to the user's query—do NOT create synonym variants.
-- Only create multiple subqueries when the user explicitly asks for different attributes, entities, or steps (e.g., “width AND weight”, or “compare A vs B”).
-- Never paraphrase the same intent into multiple subqueries.
+- When the user repeats the same request with different wording inside one question, merge everything into a single subquery containing all mentioned attributes. Example: “Give me 550W solar panel dimensions. I need width and height.” → `["550W solar panel dimensions (width and height)"]`.
+- If the question targets a single entity or task (e.g., "Who is Nyiko Rozalia?"), output exactly one subquery identical to the user's query—do NOT create synonym variants or split attributes unless different entities are involved.
+- Only create multiple subqueries when the user explicitly asks about different entities, compares items, or requests multi-step actions (e.g., “Compare inverter A vs B” or “find warranty AND installation steps”).
+- Never paraphrase the same intent into multiple subqueries. Duplicated synonyms are forbidden.
 
 OUTPUT FORMAT (JSON ONLY):
 {
