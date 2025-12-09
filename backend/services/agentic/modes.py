@@ -61,7 +61,7 @@ class PlanResult:
     """Result from search planning."""
     success: bool
     subquery_plans: List[SubqueryPlan] = field(default_factory=list)
-    max_tool_calls: int = 4
+    max_subqueries: int = 5
     error: Optional[str] = None
     raw_response: Optional[str] = None
     prompt: Optional[str] = None
@@ -298,16 +298,18 @@ async def decompose_query(
 def build_initial_plan(
     query: str,
     decomposition: Dict[str, Any],
-    max_tool_calls: int = 4,
+    max_subqueries: int = 5,
 ) -> PlanResult:
     """Create a deterministic hybrid search plan for each subquery."""
     subqueries = _extract_subqueries(decomposition, query)
     plans = _default_subquery_plans(subqueries)
-    safe_max_calls = max(1, int(max_tool_calls or 4))
+    safe_max_subqueries = max(1, int(max_subqueries or 5))
+    if len(plans) > safe_max_subqueries:
+        plans = plans[:safe_max_subqueries]
     return PlanResult(
         success=True,
         subquery_plans=plans,
-        max_tool_calls=safe_max_calls,
+        max_subqueries=safe_max_subqueries,
     )
 
 
@@ -396,7 +398,7 @@ async def review_evidence(
     try:
         plan_str = json.dumps({
             "subquery_plans": [_subplan_to_dict(p) for p in plan.subquery_plans],
-            "max_tool_calls": plan.max_tool_calls,
+            "max_subqueries": plan.max_subqueries,
         }, indent=2)
         
         evidence_summary = format_evidence_for_review(evidence)

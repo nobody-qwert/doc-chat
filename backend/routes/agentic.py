@@ -32,7 +32,7 @@ class AgenticRequest(BaseModel):
     """Request for agentic RAG endpoint."""
     query: str
     conversation_id: Optional[str] = None
-    max_tool_calls: int = 5
+    max_subqueries: Optional[int] = None
 
 
 class AgenticSource(BaseModel):
@@ -87,6 +87,9 @@ async def ask_agentic(req: AgenticRequest) -> AgenticResponse:
     query = (req.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty")
+    max_subqueries = req.max_subqueries or settings.agentic_max_subqueries
+    if max_subqueries < 1:
+        max_subqueries = settings.agentic_max_subqueries
     
     # Check if we have processed documents
     processed = await document_store.count_documents(status="processed")
@@ -116,7 +119,7 @@ async def ask_agentic(req: AgenticRequest) -> AgenticResponse:
         llm_client=llm_client,
         settings=settings,
         conversation_id=req.conversation_id,
-        max_tool_calls=req.max_tool_calls,
+        max_subqueries=max_subqueries,
     )
     
     return AgenticResponse(
@@ -149,6 +152,9 @@ async def ask_agentic_stream(req: AgenticRequest):
     query = (req.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty")
+    max_subqueries = req.max_subqueries or settings.agentic_max_subqueries
+    if max_subqueries < 1:
+        max_subqueries = settings.agentic_max_subqueries
     
     # Check if we have processed documents
     processed = await document_store.count_documents(status="processed")
@@ -180,7 +186,7 @@ async def ask_agentic_stream(req: AgenticRequest):
                 llm_client=llm_client,
                 settings=settings,
                 conversation_id=req.conversation_id,
-                max_tool_calls=req.max_tool_calls,
+                max_subqueries=max_subqueries,
             )
             async for chunk in generator:
                 yield chunk

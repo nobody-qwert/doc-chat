@@ -22,11 +22,9 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from .modes import (
     decompose_query,
     build_initial_plan,
-    review_evidence,
     compose_answer,
     inspect_evidence,
     verify_citations,
-    build_clarification_response,
     rewrite_semantic_query,
     PlanResult,
     InspectorResult,
@@ -36,7 +34,6 @@ from .tools import execute_tool, ToolResult
 logger = logging.getLogger(__name__)
 
 INSPECTOR_MAX_ITEMS = 10
-
 
 @dataclass
 class AgenticStep:
@@ -74,7 +71,7 @@ async def agentic_answer(
     llm_client: Any,
     settings: Any,
     conversation_id: Optional[str] = None,
-    max_tool_calls: int = 5,
+    max_subqueries: int = 5,
 ) -> AgenticResult:
     """
     Main agentic RAG function.
@@ -94,7 +91,7 @@ async def agentic_answer(
         llm_client: OpenAI-compatible async client
         settings: Application settings
         conversation_id: Optional conversation ID for context
-        max_tool_calls: Maximum tool calls allowed
+        max_subqueries: Maximum number of subqueries to plan
     
     Returns:
         AgenticResult with answer and metadata
@@ -106,6 +103,7 @@ async def agentic_answer(
     inspector_found_flag: Optional[bool] = None
     
     model = settings.llm_model
+    max_subqueries = max(1, int(max_subqueries or 1))
     
     async def _run_tool(
         tool_name: str,
@@ -114,8 +112,6 @@ async def agentic_answer(
     ) -> Optional[ToolResult]:
         """Execute a tool and record the step."""
         nonlocal total_tool_calls, evidence, steps
-        if total_tool_calls >= effective_max_calls:
-            return None
         args = dict(tool_args)
         if tool_name == "search_semantic" and (args.get("query") or "").strip():
             rewrite_label = "Enhance Semantic Query"
@@ -193,97 +189,141 @@ async def agentic_answer(
         decomposition = decomp_result.data or {}
 
     # Deterministic search plan derived directly from subqueries
-    plan_result = build_initial_plan(query, decomposition, max_tool_calls=max_tool_calls)
-    
-    effective_max_calls = plan_result.max_tool_calls or max_tool_calls
+    plan_result = build_initial_plan(query, decomposition, max_subqueries=max_subqueries)
+    max_subqueries = plan_result.max_subqueries or max_subqueries
+    # Normalize primary query for each subplan (first entry or raw subquery)
     for subplan in plan_result.subquery_plans:
-        base_queries = subplan.initial_queries or [subplan.subquery or query]
-        subplan.initial_queries = _augmented_initial_queries(
-            subplan.subquery or query,
-            base_queries,
-            decomposition,
-            max_queries=6,
-        )
+        if not subplan.initial_queries:
+            primary = (subplan.subquery or query).strip() or query
+            subplan.initial_queries = [primary]
+        else:
+            # Always ensure first entry matches the subquery text to avoid cross-talk
+            primary = (subplan.subquery or query).strip() or query
+            if primary:
+                subplan.initial_queries[0] = primary
     
-    # Step 2: Initial searches based on plan
-    for subplan in plan_result.subquery_plans[:2]:
-        for search_query in subplan.initial_queries[:2]:
-            if total_tool_calls >= effective_max_calls:
-                break
-            if subplan.strategy in ("keyword", "hybrid") and total_tool_calls < effective_max_calls:
-                await _run_tool(
+    # Step 2: Per-subquery search + inspect cycle
+    per_subquery_inspector_evidence: List[Dict[str, Any]] = []
+    inspector_hit_counter = 0
+    
+    async def _inspect_subquery(
+        label: str,
+        subquery_evidence: List[Dict[str, Any]],
+    ) -> Optional[InspectorResult]:
+        inspector_events: List[Dict[str, Any]] = []
+
+        async def _capture_inspector_event(event: Dict[str, Any]) -> None:
+            inspector_events.append(event)
+
+        inspector_start = time.perf_counter()
+        inspector_input = _prioritize_full_doc_evidence(subquery_evidence)
+        inspector_result = await inspect_evidence(
+            query,
+            inspector_input,
+            llm_client,
+            model,
+            max_items=min(INSPECTOR_MAX_ITEMS, len(inspector_input)),
+            max_hits=INSPECTOR_MAX_ITEMS,
+            progress_callback=_capture_inspector_event,
+        )
+        inspector_duration = time.perf_counter() - inspector_start
+        
+        steps.append(AgenticStep(
+            step_number=len(steps),
+            name=f"Inspect Evidence ({label})",
+            kind="inspect",
+            duration_seconds=inspector_duration,
+            details=_llm_step_details(
+                {
+                    "subquery": label,
+                    "inspected_items": inspector_result.inspected_items if inspector_result else 0,
+                    "hits_count": len(inspector_result.hits) if inspector_result else 0,
+                    "inspected_docs": _summarize_inspected_docs(inspector_result.inspected_docs) if inspector_result else None,
+                },
+                inspector_result,
+            ),
+            error=inspector_result.error if inspector_result and not inspector_result.success else None,
+        ))
+        for event in inspector_events:
+            event = dict(event)
+            event["subquery"] = label
+            sub_step = _inspector_event_to_step(event, len(steps))
+            steps.append(sub_step)
+        
+        return inspector_result
+    
+    for idx, subplan in enumerate(plan_result.subquery_plans, start=1):
+        subquery_label = subplan.subquery or f"Subquery {idx}"
+        primary_query = (subplan.initial_queries[0] if subplan.initial_queries else subquery_label).strip() or subquery_label
+        subquery_evidence: List[Dict[str, Any]] = []
+        search_queries = [primary_query]
+        for search_query in search_queries:
+            if subplan.strategy in ("keyword", "hybrid"):
+                result = await _run_tool(
                     "search_text",
                     {"query": search_query, "top_k": 5},
                     display_name="search_text",
                 )
-            if subplan.strategy in ("semantic", "hybrid") and total_tool_calls < effective_max_calls:
-                await _run_tool(
+                if result and result.success:
+                    subquery_evidence.extend(result.results)
+            if subplan.strategy in ("semantic", "hybrid"):
+                result = await _run_tool(
                     "search_semantic",
                     {"query": search_query, "top_k": 5},
                     display_name="search_semantic",
                 )
+                if result and result.success:
+                    subquery_evidence.extend(result.results)
+        if not subquery_evidence:
+            continue
+        subquery_evidence = _deduplicate_evidence(subquery_evidence)
+        inspector_result = await _inspect_subquery(subquery_label, subquery_evidence)
+        if inspector_result and inspector_result.success and inspector_result.hits:
+            hits_evidence = _inspector_hits_to_evidence(inspector_result.hits)
+            for _, hit in enumerate(hits_evidence, 1):
+                inspector_hit_counter += 1
+                hit["chunk_id"] = f"inspector_{inspector_hit_counter}"
+                hit["subquery"] = subquery_label
+            per_subquery_inspector_evidence.extend(hits_evidence)
+            inspector_found_flag = True
     
-    # Deduplicate evidence by chunk_id
+    # Deduplicate global evidence for fallback usage
     evidence = _deduplicate_evidence(evidence)
     
-    # Step 3: Review and refine loop
-    for iteration in range(effective_max_calls - total_tool_calls):
-        review_start = time.perf_counter()
-        review_result = await review_evidence(query, plan_result, evidence, llm_client, model)
-        review_duration = time.perf_counter() - review_start
-        
+    if per_subquery_inspector_evidence:
+        _assign_citation_ids(per_subquery_inspector_evidence)
+        compose_start = time.perf_counter()
+        compose_response = await compose_answer(
+            query,
+            per_subquery_inspector_evidence,
+            llm_client,
+            model,
+            stream=False,
+            output_preferences=decomposition.get("output_preferences"),
+        )
+        answer = compose_response.answer
+        compose_duration = time.perf_counter() - compose_start
         steps.append(AgenticStep(
             step_number=len(steps),
-            name="Review Evidence",
-            kind="review",
-            duration_seconds=review_duration,
-            details=_llm_step_details(
-                {
-                    "status": review_result.status,
-                    "reason": review_result.reason,
-                    "evidence_count": len(evidence),
-                    "proposed_tool_call": review_result.next_tool_call,
-                    "clarification_details": review_result.clarification_details,
-                },
-                review_result,
-            ),
-            error=review_result.error if not review_result.success else None,
+            name="Compose Answer (Inspector)",
+            kind="compose",
+            duration_seconds=compose_duration,
+            details=_llm_step_details({}, compose_response),
         ))
-        
-        if review_result.status == "enough":
-            break
-        
-        if review_result.status == "clarify":
-            # Need user clarification
-            clarification_msg = build_clarification_response(
-                review_result.clarification_details or {}
-            )
-            return AgenticResult(
-                answer=clarification_msg,
-                success=True,
-                sources=_build_sources(evidence),
-                conversation_id=conversation_id,
-                needs_clarification=True,
-                clarification_message=clarification_msg,
-                steps=[_step_to_dict(s) for s in steps],
-                total_tool_calls=total_tool_calls,
-                evidence_count=len(evidence),
-                finish_reason="clarify",
-            )
-        
-        # status == "more" - execute next tool call
-        if review_result.next_tool_call and total_tool_calls < effective_max_calls:
-            tool_call = review_result.next_tool_call
-            tool_name = tool_call.get("tool", "")
-            original_tool_args = tool_call.get("args", {})
-            tool_args = dict(original_tool_args)
-            
-            tool_result = await _run_tool(tool_name, tool_args, display_name=tool_name)
-            
-            if tool_result:
-                evidence = _deduplicate_evidence(evidence)
-        else:
-            break
+        verified_answer = verify_citations(answer, per_subquery_inspector_evidence)
+        sources = _build_sources(per_subquery_inspector_evidence)
+        return AgenticResult(
+            answer=verified_answer,
+            success=True,
+            sources=sources,
+            conversation_id=conversation_id,
+            needs_clarification=False,
+            steps=[_step_to_dict(s) for s in steps],
+            total_tool_calls=total_tool_calls,
+            evidence_count=len(evidence),
+            finish_reason="inspector",
+            inspector_found=True,
+        )
     
     # Inspector pass to extract direct answers from top evidence items
     inspector_result: Optional[InspectorResult] = None
@@ -419,7 +459,7 @@ async def stream_agentic_answer(
     llm_client: Any,
     settings: Any,
     conversation_id: Optional[str] = None,
-    max_tool_calls: int = 5,
+    max_subqueries: int = 5,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming version of agentic RAG.
@@ -432,7 +472,7 @@ async def stream_agentic_answer(
     steps: List[AgenticStep] = []
     evidence: List[Dict[str, Any]] = []
     total_tool_calls = 0
-    
+    max_subqueries = max(1, int(max_subqueries or 1))
     model = settings.llm_model
     
     def _emit_step(step: AgenticStep, state: str = "done") -> str:
@@ -466,26 +506,30 @@ async def stream_agentic_answer(
         decomposition = decomp_result.data or {}
 
     # Deterministic search plan derived directly from subqueries
-    plan_result = build_initial_plan(query, decomposition, max_tool_calls=max_tool_calls)
-    
-    effective_max_calls = plan_result.max_tool_calls or max_tool_calls
+    plan_result = build_initial_plan(query, decomposition, max_subqueries=max_subqueries)
+    max_subqueries = plan_result.max_subqueries or max_subqueries
     for subplan in plan_result.subquery_plans:
-        base_queries = subplan.initial_queries or [subplan.subquery or query]
-        subplan.initial_queries = _augmented_initial_queries(
-            subplan.subquery or query,
-            base_queries,
-            decomposition,
-            max_queries=6,
-        )
+        if not subplan.initial_queries:
+            primary = (subplan.subquery or query).strip() or query
+            subplan.initial_queries = [primary]
+        else:
+            primary = (subplan.subquery or query).strip() or query
+            if primary:
+                subplan.initial_queries[0] = primary
     
-    # Step 2: Initial searches
+    # Step 2: Per-subquery search + inspect (streaming)
     step_num = len(steps)
-    for subplan in plan_result.subquery_plans[:2]:
-        for search_query in subplan.initial_queries[:2]:
-            if total_tool_calls >= effective_max_calls:
-                break
-            
-            if subplan.strategy in ("keyword", "hybrid") and total_tool_calls < effective_max_calls:
+    subquery_inspector_evidence: List[Dict[str, Any]] = []
+    inspector_hit_counter = 0
+    inspector_found: Optional[bool] = None
+    
+    for idx, subplan in enumerate(plan_result.subquery_plans, start=1):
+        subquery_label = subplan.subquery or f"Subquery {idx}"
+        primary_query = (subplan.initial_queries[0] if subplan.initial_queries else subquery_label).strip() or subquery_label
+        subquery_evidence: List[Dict[str, Any]] = []
+        search_queries = [primary_query]
+        for search_query in search_queries:
+            if subplan.strategy in ("keyword", "hybrid"):
                 label = "search_text"
                 args = {"query": search_query, "top_k": 5}
                 yield _emit_step(AgenticStep(step_num, label, "tool"), "started")
@@ -515,8 +559,9 @@ async def stream_agentic_answer(
                 
                 if text_result.success:
                     evidence.extend(text_result.results)
+                    subquery_evidence.extend(text_result.results)
             
-            if subplan.strategy in ("semantic", "hybrid") and total_tool_calls < effective_max_calls:
+            if subplan.strategy in ("semantic", "hybrid"):
                 args = {"query": search_query, "top_k": 5}
                 if (search_query or "").strip():
                     rewrite_label = "Enhance Semantic Query"
@@ -576,119 +621,125 @@ async def stream_agentic_answer(
                 
                 if semantic_result.success:
                     evidence.extend(semantic_result.results)
+                    subquery_evidence.extend(semantic_result.results)
+        
+        if not subquery_evidence:
+            continue
+        subquery_evidence = _deduplicate_evidence(subquery_evidence)
+        inspector_input = _prioritize_full_doc_evidence(subquery_evidence)
+        inspector_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+
+        async def _capture_inspector_event(event: Dict[str, Any]) -> None:
+            await inspector_queue.put(event)
+
+        inspector_step = AgenticStep(step_num, f"Inspect Evidence ({subquery_label})", "inspect")
+        steps.append(inspector_step)
+        yield _emit_step(inspector_step, "started")
+        inspector_start = time.perf_counter()
+        inspector_task = asyncio.create_task(
+            inspect_evidence(
+                query,
+                inspector_input,
+                llm_client,
+                model,
+                max_items=min(INSPECTOR_MAX_ITEMS, len(inspector_input)),
+                max_hits=INSPECTOR_MAX_ITEMS,
+                progress_callback=_capture_inspector_event,
+            )
+        )
+
+        next_step_num = step_num + 1
+        while True:
+            if inspector_task.done() and inspector_queue.empty():
+                break
+            try:
+                event = await asyncio.wait_for(inspector_queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
+            event = dict(event)
+            event["subquery"] = subquery_label
+            sub_step = _inspector_event_to_step(event, next_step_num)
+            steps.append(sub_step)
+            yield _emit_step(sub_step)
+            next_step_num += 1
+
+        inspector_result = await inspector_task
+        inspector_duration = time.perf_counter() - inspector_start
+        inspector_step.duration_seconds = inspector_duration
+        inspector_step.details = _llm_step_details(
+            {
+                "subquery": subquery_label,
+                "inspected_items": inspector_result.inspected_items if inspector_result else 0,
+                "hits_count": len(inspector_result.hits) if inspector_result else 0,
+                "inspected_docs": _summarize_inspected_docs(inspector_result.inspected_docs) if inspector_result else None,
+            },
+            inspector_result,
+        )
+        inspector_step.error = (
+            inspector_result.error
+            if inspector_result and not inspector_result.success
+            else None
+        )
+        yield _emit_step(inspector_step)
+        step_num = next_step_num
+
+        if inspector_result and inspector_result.success and inspector_result.hits:
+            hits_evidence = _inspector_hits_to_evidence(inspector_result.hits)
+            for _, hit in enumerate(hits_evidence, 1):
+                inspector_hit_counter += 1
+                hit["chunk_id"] = f"inspector_{inspector_hit_counter}"
+                hit["subquery"] = subquery_label
+            subquery_inspector_evidence.extend(hits_evidence)
+            inspector_found = True
     
     evidence = _deduplicate_evidence(evidence)
     
-    # Step 3: Review loop (simplified for streaming)
-    for iteration in range(min(2, effective_max_calls - total_tool_calls)):
-        yield _emit_step(AgenticStep(step_num, "Review Evidence", "review"), "started")
-        review_start = time.perf_counter()
-        
-        review_result = await review_evidence(query, plan_result, evidence, llm_client, model)
-        review_duration = time.perf_counter() - review_start
-        
+    if subquery_inspector_evidence:
+        _assign_citation_ids(subquery_inspector_evidence)
+        yield _emit_step(AgenticStep(step_num, "Compose Answer (Inspector)", "compose"), "started")
+        compose_start = time.perf_counter()
+        answer_parts: List[str] = []
+        compose_stream = await compose_answer(
+            query,
+            subquery_inspector_evidence,
+            llm_client,
+            model,
+            stream=True,
+            output_preferences=decomposition.get("output_preferences"),
+        )
+        answer_generator = compose_stream.stream
+        async for token in answer_generator:
+            answer_parts.append(token)
+            yield json.dumps({"type": "token", "content": token}) + "\n"
+        compose_duration = time.perf_counter() - compose_start
+        full_answer = "".join(answer_parts)
+        verified_answer = verify_citations(full_answer, subquery_inspector_evidence)
         step = AgenticStep(
             step_number=step_num,
-            name="Review Evidence",
-            kind="review",
-            duration_seconds=review_duration,
-            details=_llm_step_details(
-                {
-                    "status": review_result.status,
-                    "reason": review_result.reason,
-                    "evidence_count": len(evidence),
-                    "proposed_tool_call": review_result.next_tool_call,
-                    "clarification_details": review_result.clarification_details,
-                },
-                review_result,
-            ),
+            name="Compose Answer (Inspector)",
+            kind="compose",
+            duration_seconds=compose_duration,
+            details=_llm_step_details({}, {
+                "prompt": compose_stream.prompt,
+                "prompt_messages": compose_stream.prompt_messages,
+                "raw_response": full_answer,
+            }),
         )
         steps.append(step)
         yield _emit_step(step)
-        step_num += 1
-        
-        if review_result.status == "enough":
-            break
-        
-        if review_result.status == "clarify":
-            clarification_msg = build_clarification_response(review_result.clarification_details or {})
-            yield json.dumps({"type": "token", "content": clarification_msg}) + "\n"
-            yield json.dumps({
-                "type": "final",
-                "answer": clarification_msg,
-                "needs_clarification": True,
-                "sources": _build_sources(evidence),
-                "steps": [_step_to_dict(s) for s in steps],
-                "total_tool_calls": total_tool_calls,
-                "evidence_count": len(evidence),
-                "finish_reason": "clarify",
-            }) + "\n"
-            return
-        
-        if review_result.next_tool_call and total_tool_calls < effective_max_calls:
-            tool_call = review_result.next_tool_call
-            tool_name = tool_call.get("tool", "")
-            original_tool_args = tool_call.get("args", {})
-            tool_args = dict(original_tool_args)
-            if tool_name == "search_semantic" and (tool_args.get("query") or "").strip():
-                rewrite_label = "Enhance Semantic Query"
-                yield _emit_step(AgenticStep(step_num, rewrite_label, "rewrite"), "started")
-                rewrite_start = time.perf_counter()
-                rewrite_result = await rewrite_semantic_query(
-                    original_query=tool_args.get("query", ""),
-                    user_query=query,
-                    llm_client=llm_client,
-                    model=model,
-                )
-                rewrite_duration = time.perf_counter() - rewrite_start
-                rewritten_query = rewrite_result.rewritten_query or tool_args.get("query", "")
-                tool_args["query"] = rewritten_query
-                rewrite_step = AgenticStep(
-                    step_number=step_num,
-                    name=rewrite_label,
-                    kind="rewrite",
-                    duration_seconds=rewrite_duration,
-                    details=_llm_step_details(
-                        {
-                            "original_query": original_tool_args.get("query"),
-                            "rewritten_query": rewritten_query,
-                        },
-                        rewrite_result,
-                    ),
-                    error=rewrite_result.error if not rewrite_result.success else None,
-                )
-                steps.append(rewrite_step)
-                yield _emit_step(rewrite_step)
-                step_num += 1
-            
-            yield _emit_step(AgenticStep(step_num, tool_name, "tool"), "started")
-            tool_start = time.perf_counter()
-            
-            tool_result = await execute_tool(
-                tool_name=tool_name,
-                args=tool_args,
-                document_store=document_store,
-                embedding_client=embedding_client,
-                embedding_cache=embedding_cache,
-                settings=settings,
-            )
-            total_tool_calls += 1
-            tool_duration = time.perf_counter() - tool_start
-            
-            step = AgenticStep(
-                step_number=step_num,
-                name=tool_name,
-                kind="tool",
-                duration_seconds=tool_duration,
-                details=_tool_step_details(tool_name, tool_args, tool_result),
-            )
-            steps.append(step)
-            yield _emit_step(step)
-            step_num += 1
-            
-            if tool_result.success:
-                evidence.extend(tool_result.results)
-            evidence = _deduplicate_evidence(evidence)
+        yield json.dumps({
+            "type": "final",
+            "answer": verified_answer,
+            "needs_clarification": False,
+            "sources": _build_sources(subquery_inspector_evidence),
+            "conversation_id": conversation_id,
+            "steps": [_step_to_dict(s) for s in steps],
+            "total_tool_calls": total_tool_calls,
+            "evidence_count": len(evidence),
+            "finish_reason": "inspector",
+            "inspector_found": True,
+        }) + "\n"
+        return
     
     # Inspector pass
     if evidence:

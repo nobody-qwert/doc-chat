@@ -56,6 +56,7 @@ class AppSettings:
     llm_ready_timeout: float
     diagnostics_url: Optional[str]
     embedding_tokenizer_id: str
+    agentic_max_subqueries: int
 
 
 def _int_env(name: str, default: str) -> int:
@@ -114,6 +115,7 @@ def load_settings() -> AppSettings:
     diagnostics_url = _str_env("DIAGNOSTICS_URL", "http://diagnostics:9001").rstrip("/")
 
     min_context_similarity = float(os.environ.get("MIN_CONTEXT_SIMILARITY", "0.35") or 0.35)
+    agentic_max_subqueries = max(1, _int_env("AGENTIC_MAX_SUBQUERIES", "5"))
     return AppSettings(
         data_dir=data_dir,
         index_dir=index_dir,
@@ -159,6 +161,7 @@ def load_settings() -> AppSettings:
         llm_ready_timeout=_float_env("LLM_READY_TIMEOUT", "180"),
         diagnostics_url=diagnostics_url or None,
         embedding_tokenizer_id=_str_env("EMBEDDING_TOKENIZER_ID", "nomic-ai/nomic-embed-text-v1.5"),
+        agentic_max_subqueries=agentic_max_subqueries,
     )
 
 
