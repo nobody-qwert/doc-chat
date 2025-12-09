@@ -119,8 +119,8 @@ INSPECTOR_SYSTEM_PROMPT = """You are a fact extraction agent.
 You are given the user's question and a single document snippet.
 
 Your job:
-1. Decide if the snippet contains enough information to answer the question.
-2. If yes, extract the key facts and present a concise answer grounded in the snippet.
+1. Verify if the snippet EXPLICITLY covers the specific entities (e.g., model numbers, power ratings) requested in the question.
+2. If and ONLY if the specific entity is found, extract the key facts and present a concise answer grounded in the snippet.
 
 STRICT RULES:
 - Output exactly one JSON object with schema:
@@ -128,7 +128,8 @@ STRICT RULES:
     "found": true | false,
     "quote": "concise answer grounded in the snippet, including necessary context (e.g. entity name)"
   }
-- If the snippet does not contain the required information, set found=false and leave other fields empty or defaults.
+- If the snippet does not contain the *specific* entity asked about (e.g. user asks for 550W but snippet is for 470W), set found=false.
+- Do NOT output facts for a different entity just because it is in the snippet.
 - Never invent information not present in the snippet.
 """
 
