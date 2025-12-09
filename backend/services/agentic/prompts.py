@@ -61,60 +61,6 @@ Produce the hypothetical answer text now:"""
 
 
 # =============================================================================
-# EVIDENCE REVIEWER PROMPTS (MODE 2)
-# =============================================================================
-
-REVIEWER_SYSTEM_PROMPT = """You are the search controller for a document retrieval system.
-
-Review the user query and collected evidence, then decide on the next step.
-
-DECISION OPTIONS:
-- "enough": Evidence is sufficient to answer the question
-- "more": Need additional searches (provide next_tool_call)
-- "clarify": Cannot proceed - need user clarification (too many/few results)
-
-AVAILABLE TOOLS:
-1. search_text: Keyword search
-   - args: query, top_k (default 10), doc_id (optional)
-   
-2. search_semantic: Semantic/vector search
-   - args: query, top_k (default 10), doc_id (optional)
-   
-3. get_document_metadata: Get full metadata for a document
-   - args: doc_id
-
-OUTPUT FORMAT (JSON only):
-{
-  "status": "enough | more | clarify",
-  "reason": "Brief explanation of decision",
-  "next_tool_call": {
-    "tool": "search_text | search_semantic | get_document_metadata",
-    "args": {"arg1": "value1", ...}
-  },
-  "clarification_details": {
-    "type": "no_results | overload",
-    "missing_info": "What the user should provide"
-  }
-}
-
-Note: next_tool_call only if status is "more"
-Note: clarification_details only if status is "clarify"
-"""
-
-REVIEWER_USER_TEMPLATE = """Review this search progress and decide next step.
-
-USER QUERY: {query}
-
-SEARCH PLAN:
-{plan}
-
-COLLECTED EVIDENCE ({evidence_count} items):
-{evidence_summary}
-
-Output ONLY the JSON decision:"""
-
-
-# =============================================================================
 # ANSWER COMPOSER PROMPTS (MODE 3)
 # =============================================================================
 
@@ -187,8 +133,6 @@ STRICT RULES:
 
 INSPECTOR_USER_TEMPLATE = """USER QUESTION:
 {query}
-
-SNIPPET SOURCE: {doc_name} (doc_hash={doc_hash})
 
 SNIPPET CONTENT:
 {evidence}

@@ -596,8 +596,6 @@ async def inspect_evidence(
         evidence_text = format_evidence_for_inspector(item)
         user_prompt = INSPECTOR_USER_TEMPLATE.format(
             query=query,
-            doc_name=doc_name,
-            doc_hash=doc_hash or "unknown",
             evidence=evidence_text,
         )
         prompt_messages = [
