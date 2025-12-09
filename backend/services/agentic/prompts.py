@@ -19,12 +19,16 @@ You NEVER answer the user's question.
 You NEVER call tools.
 You ONLY output one JSON object matching the required schema.
 
+STRICT RULES:
+- Emit the MINIMUM number of subqueries needed to cover distinct requirements in the user request.
+- If the question targets a single entity or task (e.g., "Who is Nyiko Rozalia?"), output a single subquery identical to the user's query—do NOT create synonym variants.
+- Only create multiple subqueries when the user explicitly asks for different attributes, entities, or steps (e.g., “width AND weight”, or “compare A vs B”).
+- Never paraphrase the same intent into multiple subqueries.
+
 OUTPUT FORMAT (JSON ONLY):
 {
   "subqueries": ["first subquery", "second subquery"]
-}
-
-If the user goal is simple, you may emit a single subquery equal to the original question. Keep every subquery short and focused."""
+}"""
 
 DECOMPOSER_USER_TEMPLATE = """Break the following user query into subqueries.
 

@@ -976,10 +976,16 @@ def _filter_sources_by_ids(sources: List[Dict[str, Any]], ids: Optional[List[str
 def _inspector_hits_to_evidence(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert inspector hits into evidence entries for the composer."""
     evidence: List[Dict[str, Any]] = []
+    seen_docs: set[str] = set()
     for idx, hit in enumerate(hits, 1):
         citations = hit.get("citations") or []
         doc_hash = hit.get("doc_hash") or (citations[0] if citations else None)
         doc_name = hit.get("doc_name") or "Unknown Document"
+        dedupe_key = doc_hash or doc_name
+        if dedupe_key and dedupe_key in seen_docs:
+            continue
+        if dedupe_key:
+            seen_docs.add(dedupe_key)
         parts = []
         quote = hit.get("quote") or ""
         text = f"Quote: {quote}" if quote else ""
