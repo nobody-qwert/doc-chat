@@ -21,7 +21,6 @@ You ONLY output one JSON object matching the required schema.
 
 OUTPUT FORMAT (JSON ONLY):
 {
-  "intent": "qa | list | summarize | compare | compute",
   "subqueries": ["first subquery", "second subquery"]
 }
 

@@ -188,7 +188,7 @@ async def agentic_answer(
     ))
     
     if not decomp_result.success:
-        decomposition = {"intent": "qa", "subqueries": [{"query": query}]}
+        decomposition = {"subqueries": [{"query": query}]}
     else:
         decomposition = decomp_result.data or {}
 
@@ -461,7 +461,7 @@ async def stream_agentic_answer(
     yield _emit_step(step)
     
     if not decomp_result.success:
-        decomposition = {"intent": "qa", "subqueries": [{"query": query}]}
+        decomposition = {"subqueries": [{"query": query}]}
     else:
         decomposition = decomp_result.data or {}
 
