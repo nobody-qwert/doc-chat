@@ -65,6 +65,7 @@ class AppSettings:
     agentic_expanded_char_multiplier: int
     agentic_min_expanded_chars: int
     agentic_max_expanded_chars: int
+    agentic_inspector_max_items: int
 
 
 def _require_env(name: str) -> str:
@@ -143,6 +144,7 @@ def load_settings() -> AppSettings:
     agentic_expanded_char_multiplier = _int_env("AGENTIC_EXPANDED_CHAR_MULTIPLIER")
     agentic_min_expanded_chars = _int_env("AGENTIC_MIN_EXPANDED_CHARS")
     agentic_max_expanded_chars = _int_env("AGENTIC_MAX_EXPANDED_CHARS")
+    agentic_inspector_max_items = _int_env("AGENTIC_INSPECTOR_MAX_ITEMS")
     frontend_port = _str_env("FRONTEND_PORT")
     return AppSettings(
         data_dir=data_dir,
@@ -198,4 +200,5 @@ def load_settings() -> AppSettings:
         agentic_expanded_char_multiplier=agentic_expanded_char_multiplier,
         agentic_min_expanded_chars=agentic_min_expanded_chars,
         agentic_max_expanded_chars=agentic_max_expanded_chars,
+        agentic_inspector_max_items=agentic_inspector_max_items,
     )

@@ -27,8 +27,6 @@ from .tools import execute_tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
-INSPECTOR_MAX_ITEMS = 10
-
 @dataclass
 class AgenticStep:
     """Record of a single step in the agentic loop."""
@@ -64,6 +62,7 @@ async def stream_agentic_answer(
     total_tool_calls = 0
     max_subqueries = max(1, int(max_subqueries or 1))
     model = settings.llm_model
+    inspector_max_items = settings.agentic_inspector_max_items
     
     def _emit_step(step: AgenticStep, state: str = "done") -> str:
         step_dict = _step_to_dict(step)
@@ -230,8 +229,8 @@ async def stream_agentic_answer(
                 inspector_input,
                 llm_client,
                 model,
-                max_items=min(INSPECTOR_MAX_ITEMS, len(inspector_input)),
-                max_hits=INSPECTOR_MAX_ITEMS,
+                max_items=min(inspector_max_items, len(inspector_input)),
+                max_hits=inspector_max_items,
                 progress_callback=_capture_inspector_event,
             )
         )
@@ -329,119 +328,10 @@ async def stream_agentic_answer(
         }) + "\n"
         return
     
-    # Inspector pass
-    if evidence:
-        inspector_input = _prioritize_full_doc_evidence(evidence)
-        inspector_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
-
-        async def _capture_inspector_event(event: Dict[str, Any]) -> None:
-            await inspector_queue.put(event)
-
-        inspector_step = AgenticStep(step_num, "Inspect Evidence", "inspect")
-        steps.append(inspector_step)
-        yield _emit_step(inspector_step, "started")
-        inspector_start = time.perf_counter()
-        inspector_task = asyncio.create_task(
-            inspect_evidence(
-                query,
-                inspector_input,
-                llm_client,
-                model,
-                max_items=min(INSPECTOR_MAX_ITEMS, len(inspector_input)),
-                max_hits=INSPECTOR_MAX_ITEMS,
-                progress_callback=_capture_inspector_event,
-            )
-        )
-
-        next_step_num = step_num + 1
-        while True:
-            if inspector_task.done() and inspector_queue.empty():
-                break
-            try:
-                event = await asyncio.wait_for(inspector_queue.get(), timeout=0.1)
-            except asyncio.TimeoutError:
-                continue
-            sub_step = _inspector_event_to_step(event, next_step_num)
-            steps.append(sub_step)
-            yield _emit_step(sub_step)
-            next_step_num += 1
-
-        inspector_result = await inspector_task
-        inspector_duration = time.perf_counter() - inspector_start
-        inspector_step.duration_seconds = inspector_duration
-        inspector_step.details = _llm_step_details(
-            {
-                "inspected_items": inspector_result.inspected_items if inspector_result else 0,
-                "hits_count": len(inspector_result.hits) if inspector_result else 0,
-                "inspected_docs": _summarize_inspected_docs(inspector_result.inspected_docs) if inspector_result else None,
-            },
-            inspector_result,
-        )
-        inspector_step.error = (
-            inspector_result.error
-            if inspector_result and not inspector_result.success
-            else None
-        )
-        if inspector_result is not None:
-            if inspector_result.success:
-                inspector_found = bool(inspector_result.hits)
-            else:
-                inspector_found = None
-        yield _emit_step(inspector_step)
-        step_num = next_step_num
-
-        if inspector_result and inspector_result.success and inspector_result.hits:
-            inspector_evidence = _inspector_hits_to_evidence(inspector_result.hits)
-            _assign_citation_ids(inspector_evidence)
-            yield _emit_step(AgenticStep(step_num, "Compose Answer (Inspector)", "compose"), "started")
-            compose_start = time.perf_counter()
-            answer_parts: List[str] = []
-            compose_stream = await compose_answer(
-                query,
-                inspector_evidence,
-                llm_client,
-                model,
-                stream=True,
-                output_preferences=decomposition.get("output_preferences"),
-            )
-            answer_generator = compose_stream.stream
-            async for token in answer_generator:
-                answer_parts.append(token)
-                yield json.dumps({"type": "token", "content": token}) + "\n"
-            compose_duration = time.perf_counter() - compose_start
-            full_answer = "".join(answer_parts)
-            verified_answer = verify_citations(full_answer, inspector_evidence)
-            step = AgenticStep(
-                step_number=step_num,
-                name="Compose Answer (Inspector)",
-                kind="compose",
-                duration_seconds=compose_duration,
-                details=_llm_step_details({}, {
-                    "prompt": compose_stream.prompt,
-                    "prompt_messages": compose_stream.prompt_messages,
-                    "raw_response": full_answer,
-                }),
-            )
-            steps.append(step)
-            yield _emit_step(step)
-            yield json.dumps({
-                "type": "final",
-                "answer": verified_answer,
-                "needs_clarification": False,
-                "sources": _build_sources(inspector_evidence),
-                "conversation_id": conversation_id,
-                "steps": [_step_to_dict(s) for s in steps],
-                "total_tool_calls": total_tool_calls,
-                "evidence_count": len(evidence),
-                "finish_reason": "inspector",
-                "inspector_found": True,
-            }) + "\n"
-            return
-    
     # Prune evidence
     evidence = _prune_evidence(evidence, max_items=15)
     _assign_citation_ids(evidence)
-    composer_evidence = [] if inspector_found is False else evidence
+    composer_evidence = evidence
     
     # Step 4: Compose answer with streaming
     yield _emit_step(AgenticStep(step_num, "Compose Answer", "compose"), "started")
