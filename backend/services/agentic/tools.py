@@ -19,16 +19,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Context expansion settings
-SHORT_DOC_CHUNK_LIMIT = 20  # Fallback heuristic when token counts missing
-SHORT_DOC_TOKEN_LIMIT = 4000  # Prefer full-doc context when total tokens <= this
-EXPANSION_CHUNKS_BEFORE = 10
-EXPANSION_CHUNKS_AFTER = 10
-MAX_EXPANDED_CHUNKS = 20
-EXPANDED_CHAR_MULTIPLIER = 20  # Expand snippet length relative to default context_chars
-MIN_EXPANDED_CHARS = 4000
-MAX_EXPANDED_CHARS = 5000
-
 
 @dataclass
 class ToolResult:
@@ -74,7 +64,13 @@ async def search_text(
         doc_chunks_cache: Dict[str, List[Dict[str, Any]]] = {}
         doc_text_cache: Dict[str, str] = {}
         search_terms = _prepare_search_terms(query)
-        
+        short_doc_chunk_limit = getattr(settings, "agentic_short_doc_chunk_limit")
+        short_doc_token_limit = getattr(settings, "agentic_short_doc_token_limit")
+        expansion_before = getattr(settings, "agentic_expansion_chunks_before")
+        expansion_after = getattr(settings, "agentic_expansion_chunks_after")
+        max_window_chunks = getattr(settings, "agentic_max_expanded_chunks")
+        expanded_char_limit = _expansion_char_limit(context_chars, settings)
+
         if not matching_doc_hashes:
             return ToolResult(
                 tool_name="search_text",
@@ -83,6 +79,13 @@ async def search_text(
                 total_found=0,
             )
         keyword_threshold = getattr(settings, "min_keyword_score", 0.0)
+
+        short_doc_chunk_limit = getattr(settings, "agentic_short_doc_chunk_limit")
+        short_doc_token_limit = getattr(settings, "agentic_short_doc_token_limit")
+        expansion_before = getattr(settings, "agentic_expansion_chunks_before")
+        expansion_after = getattr(settings, "agentic_expansion_chunks_after")
+        max_window_chunks = getattr(settings, "agentic_max_expanded_chunks")
+        expanded_char_limit = _expansion_char_limit(context_chars, settings)
 
         short_doc_results: List[Dict[str, Any]] = []
         long_doc_hits: List[Dict[str, Any]] = []
@@ -95,7 +98,7 @@ async def search_text(
             if doc_total_tokens is None:
                 raise ValueError(f"Document {doc_hash} is missing token_count metadata")
             
-            if doc_total_tokens <= SHORT_DOC_TOKEN_LIMIT:
+            if doc_total_tokens <= short_doc_token_limit:
                 doc_text = await _load_full_document_text(
                     doc_hash,
                     document_store=document_store,
@@ -142,10 +145,12 @@ async def search_text(
             settings=settings,
             doc_text_cache=doc_text_cache,
             doc_token_map=doc_token_map,
-            short_doc_chunk_limit=SHORT_DOC_CHUNK_LIMIT,
-            short_doc_token_limit=SHORT_DOC_TOKEN_LIMIT,
-            max_window_chunks=MAX_EXPANDED_CHUNKS,
-            max_chars=_expansion_char_limit(context_chars),
+            short_doc_chunk_limit=short_doc_chunk_limit,
+            short_doc_token_limit=short_doc_token_limit,
+            expansion_before=expansion_before,
+            expansion_after=expansion_after,
+            max_window_chunks=max_window_chunks,
+            max_chars=expanded_char_limit,
         )
         
         combined_results = short_doc_results + expanded_long_hits
@@ -217,7 +222,13 @@ async def search_semantic(
         doc_token_map = _build_doc_token_map(doc_info_map)
         doc_chunks_cache: Dict[str, List[Dict[str, Any]]] = {}
         doc_text_cache: Dict[str, str] = {}
-        
+        short_doc_chunk_limit = getattr(settings, "agentic_short_doc_chunk_limit")
+        short_doc_token_limit = getattr(settings, "agentic_short_doc_token_limit")
+        expansion_before = getattr(settings, "agentic_expansion_chunks_before")
+        expansion_after = getattr(settings, "agentic_expansion_chunks_after")
+        max_window_chunks = getattr(settings, "agentic_max_expanded_chunks")
+        expanded_char_limit = _expansion_char_limit(context_chars, settings)
+
         if not matching_doc_hashes_set:
             return ToolResult(
                 tool_name="search_semantic",
@@ -298,10 +309,12 @@ async def search_semantic(
             settings=settings,
             doc_text_cache=doc_text_cache,
             doc_token_map=doc_token_map,
-            short_doc_chunk_limit=SHORT_DOC_CHUNK_LIMIT,
-            short_doc_token_limit=SHORT_DOC_TOKEN_LIMIT,
-            max_window_chunks=MAX_EXPANDED_CHUNKS,
-            max_chars=_expansion_char_limit(context_chars),
+            short_doc_chunk_limit=short_doc_chunk_limit,
+            short_doc_token_limit=short_doc_token_limit,
+            expansion_before=expansion_before,
+            expansion_after=expansion_after,
+            max_window_chunks=max_window_chunks,
+            max_chars=expanded_char_limit,
         )
 
         return ToolResult(
@@ -411,7 +424,8 @@ async def _load_full_document_text(
         if extraction:
             text = extraction.get("text")
     if text is None and fallback_chunks is not None:
-        text = _join_chunk_texts(fallback_chunks, MAX_EXPANDED_CHARS * 2)
+        max_chars = getattr(settings, "agentic_max_expanded_chars")
+        text = _join_chunk_texts(fallback_chunks, max_chars * 2)
     if text is None:
         text = ""
     doc_text_cache[doc_hash] = text
@@ -469,12 +483,12 @@ async def _expand_evidence_chunks(
     settings: Any,
     doc_text_cache: Optional[Dict[str, str]] = None,
     doc_token_map: Optional[Dict[str, int]] = None,
-    short_doc_chunk_limit: int = SHORT_DOC_CHUNK_LIMIT,
-    short_doc_token_limit: int = SHORT_DOC_TOKEN_LIMIT,
-    expansion_before: int = EXPANSION_CHUNKS_BEFORE,
-    expansion_after: int = EXPANSION_CHUNKS_AFTER,
-    max_window_chunks: int = MAX_EXPANDED_CHUNKS,
-    max_chars: int = MAX_EXPANDED_CHARS,
+    short_doc_chunk_limit: Optional[int] = None,
+    short_doc_token_limit: Optional[int] = None,
+    expansion_before: Optional[int] = None,
+    expansion_after: Optional[int] = None,
+    max_window_chunks: Optional[int] = None,
+    max_chars: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Expand evidence snippets by including full documents or neighboring chunks."""
     if not results:
@@ -487,6 +501,13 @@ async def _expand_evidence_chunks(
     chunk_index_cache: Dict[str, Dict[str, int]] = {}
     expanded: List[Dict[str, Any]] = []
     seen_full_docs: Set[str] = set()
+
+    short_doc_chunk_limit = short_doc_chunk_limit if short_doc_chunk_limit is not None else getattr(settings, "agentic_short_doc_chunk_limit")
+    short_doc_token_limit = short_doc_token_limit if short_doc_token_limit is not None else getattr(settings, "agentic_short_doc_token_limit")
+    expansion_before = expansion_before if expansion_before is not None else getattr(settings, "agentic_expansion_chunks_before")
+    expansion_after = expansion_after if expansion_after is not None else getattr(settings, "agentic_expansion_chunks_after")
+    max_window_chunks = max_window_chunks if max_window_chunks is not None else getattr(settings, "agentic_max_expanded_chunks")
+    max_chars = max_chars if max_chars is not None else getattr(settings, "agentic_max_expanded_chars")
 
     for item in results:
         doc_hash = item.get("doc_hash")
@@ -686,10 +707,13 @@ def _detect_overlap(existing: str, addition: str, max_overlap: int) -> int:
     return 0
 
 
-def _expansion_char_limit(base_chars: int) -> int:
+def _expansion_char_limit(base_chars: int, settings: Any) -> int:
     """Compute the char cap for expanded context."""
-    scaled = max(base_chars * EXPANDED_CHAR_MULTIPLIER, MIN_EXPANDED_CHARS)
-    return min(scaled, MAX_EXPANDED_CHARS)
+    multiplier = getattr(settings, "agentic_expanded_char_multiplier")
+    min_chars = getattr(settings, "agentic_min_expanded_chars")
+    max_chars = getattr(settings, "agentic_max_expanded_chars")
+    scaled = max(base_chars * multiplier, min_chars)
+    return min(scaled, max_chars)
 
 
 async def execute_tool(

@@ -77,7 +77,19 @@ services:
     environment:
       LLAMA_CUBLAS: "1"
       LLM_CONTROL_PORT: ${LLM_CONTROL_PORT}
-      LLM_SERVER_CMD: ${LLM_SERVER_CMD}
+      LLM_SERVER_CMD: >-
+        python3 -m llama_cpp.server
+        --model /models/llm/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
+        --model_alias default
+        --host 0.0.0.0
+        --port 8000
+        --chat_format chatml
+        --n_ctx ${LLM_CONTEXT_SIZE}
+        --n_batch ${LLM_BATCH_SIZE}
+        --n_gpu_layers -1
+        --flash_attn true
+        --use_mlock true
+        --api_key ${LLM_API_KEY}
       LLM_SERVER_SHUTDOWN_TIMEOUT: ${LLM_SERVER_SHUTDOWN_TIMEOUT}
       LOG_LEVEL: ${LOG_LEVEL}
     deploy:

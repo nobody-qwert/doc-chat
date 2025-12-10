@@ -57,6 +57,14 @@ class AppSettings:
     diagnostics_url: Optional[str]
     embedding_tokenizer_id: str
     agentic_max_subqueries: int
+    agentic_short_doc_chunk_limit: int
+    agentic_short_doc_token_limit: int
+    agentic_expansion_chunks_before: int
+    agentic_expansion_chunks_after: int
+    agentic_max_expanded_chunks: int
+    agentic_expanded_char_multiplier: int
+    agentic_min_expanded_chars: int
+    agentic_max_expanded_chars: int
 
 
 def _require_env(name: str) -> str:
@@ -127,6 +135,14 @@ def load_settings() -> AppSettings:
 
     min_context_similarity = _float_env("MIN_CONTEXT_SIMILARITY")
     agentic_max_subqueries = max(1, _int_env("AGENTIC_MAX_SUBQUERIES"))
+    agentic_short_doc_chunk_limit = _int_env("AGENTIC_SHORT_DOC_CHUNK_LIMIT")
+    agentic_short_doc_token_limit = _int_env("AGENTIC_SHORT_DOC_TOKEN_LIMIT")
+    agentic_expansion_chunks_before = _int_env("AGENTIC_EXPANSION_CHUNKS_BEFORE")
+    agentic_expansion_chunks_after = _int_env("AGENTIC_EXPANSION_CHUNKS_AFTER")
+    agentic_max_expanded_chunks = _int_env("AGENTIC_MAX_EXPANDED_CHUNKS")
+    agentic_expanded_char_multiplier = _int_env("AGENTIC_EXPANDED_CHAR_MULTIPLIER")
+    agentic_min_expanded_chars = _int_env("AGENTIC_MIN_EXPANDED_CHARS")
+    agentic_max_expanded_chars = _int_env("AGENTIC_MAX_EXPANDED_CHARS")
     frontend_port = _str_env("FRONTEND_PORT")
     return AppSettings(
         data_dir=data_dir,
@@ -174,4 +190,12 @@ def load_settings() -> AppSettings:
         diagnostics_url=diagnostics_url or None,
         embedding_tokenizer_id=_str_env("EMBEDDING_TOKENIZER_ID"),
         agentic_max_subqueries=agentic_max_subqueries,
+        agentic_short_doc_chunk_limit=agentic_short_doc_chunk_limit,
+        agentic_short_doc_token_limit=agentic_short_doc_token_limit,
+        agentic_expansion_chunks_before=agentic_expansion_chunks_before,
+        agentic_expansion_chunks_after=agentic_expansion_chunks_after,
+        agentic_max_expanded_chunks=agentic_max_expanded_chunks,
+        agentic_expanded_char_multiplier=agentic_expanded_char_multiplier,
+        agentic_min_expanded_chars=agentic_min_expanded_chars,
+        agentic_max_expanded_chars=agentic_max_expanded_chars,
     )
