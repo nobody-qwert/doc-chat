@@ -15,6 +15,9 @@ tell me 550W solar panel dimensions
 tell me Laszlo Marias electricity and natural gas consumption bills. i need the period for each bill and the paid value.
 
 
+da-mi valorile platite de Laszlo Maria pentru electricitate si gaz din facturi. im trebuie si perioada si valoarea. Dami raspunsul in forma de tabel
+
+
 who is Ion Iliescu 
 
 
