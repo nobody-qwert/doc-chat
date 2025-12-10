@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import re
 from dataclasses import dataclass
 from pathlib import Path
-import re
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -15,16 +15,30 @@ class MineruResult:
     metadata: Dict[str, Any]
 
 
-def _env_bool(name: str, default: bool) -> bool:
+def _require_env(name: str) -> str:
     val = os.environ.get(name)
     if val is None:
-        return default
-    v = val.strip().lower()
+        raise RuntimeError(f"Missing required environment variable {name}")
+    cleaned = val.strip()
+    if not cleaned:
+        raise RuntimeError(f"Environment variable {name} cannot be empty")
+    return cleaned
+
+
+def _env_bool(name: str) -> bool:
+    v = _require_env(name).lower()
     if v in {"1", "true", "yes", "on"}:
         return True
     if v in {"0", "false", "no", "off"}:
         return False
-    return default
+    raise RuntimeError(f"Environment variable {name} must be boolean (got {v!r})")
+
+
+def _pick_str(value: Optional[str], default: str) -> str:
+    if value is None:
+        return default
+    cleaned = str(value).strip()
+    return cleaned or default
 
 
 _IMAGE_PATTERN = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
@@ -182,7 +196,7 @@ def run_mineru(
         raise RuntimeError("mineru is not installed: pip install mineru") from exc
 
     # Resolve device mode: auto|cuda|cpu
-    requested = (os.environ.get("MINERU_DEVICE_MODE") or "auto").strip().lower()
+    requested = _require_env("MINERU_DEVICE_MODE").lower()
     effective = requested
     cuda_available = False
     gpu_name: Optional[str] = None
@@ -210,10 +224,12 @@ def run_mineru(
     pdf_bytes = pdf_path.read_bytes()
 
     # Defaults can be overridden by env or function args
-    p_method = (parse_method or os.environ.get("MINERU_PARSE_METHOD") or "auto").strip().lower()
-    p_lang = (lang or os.environ.get("MINERU_LANG") or "en").strip()
-    p_table = table_enable if table_enable is not None else _env_bool("MINERU_TABLE_ENABLE", True)
-    p_formula = formula_enable if formula_enable is not None else _env_bool("MINERU_FORMULA_ENABLE", True)
+    env_parse_method = _require_env("MINERU_PARSE_METHOD")
+    env_lang = _require_env("MINERU_LANG")
+    p_method = _pick_str(parse_method, env_parse_method).lower()
+    p_lang = _pick_str(lang, env_lang)
+    p_table = table_enable if table_enable is not None else _env_bool("MINERU_TABLE_ENABLE")
+    p_formula = formula_enable if formula_enable is not None else _env_bool("MINERU_FORMULA_ENABLE")
 
     combined_parts: List[str] = []
     all_image_entries: List[Dict[str, Any]] = []
@@ -350,7 +366,7 @@ def warmup_mineru(*,
         os.environ["MINERU_DEVICE_MODE"] = device_mode
 
     # Resolve device mode: auto|cuda|cpu
-    requested = (os.environ.get("MINERU_DEVICE_MODE") or "auto").strip().lower()
+    requested = _require_env("MINERU_DEVICE_MODE").lower()
     effective = requested
     cuda_available = False
     try:
@@ -370,15 +386,17 @@ def warmup_mineru(*,
     # Create a tiny single-page PDF in memory without external dependencies
     pdf_bytes = _generate_warmup_pdf_bytes()
 
-    default_base = Path(os.environ.get("INDEX_DIR", "/app_data/runtime")) / "_warmup"
+    default_base = Path(_require_env("INDEX_DIR")) / "_warmup"
     out_base = Path(tmp_dir) if tmp_dir is not None else default_base
     out_base.mkdir(parents=True, exist_ok=True)
 
     # Effective config
-    p_method = (parse_method or os.environ.get("MINERU_PARSE_METHOD") or "auto").strip().lower()
-    p_lang = (lang or os.environ.get("MINERU_LANG") or "en").strip()
-    p_table = table_enable if table_enable is not None else _env_bool("MINERU_TABLE_ENABLE", True)
-    p_formula = formula_enable if formula_enable is not None else _env_bool("MINERU_FORMULA_ENABLE", True)
+    env_parse_method = _require_env("MINERU_PARSE_METHOD")
+    env_lang = _require_env("MINERU_LANG")
+    p_method = _pick_str(parse_method, env_parse_method).lower()
+    p_lang = _pick_str(lang, env_lang)
+    p_table = table_enable if table_enable is not None else _env_bool("MINERU_TABLE_ENABLE")
+    p_formula = formula_enable if formula_enable is not None else _env_bool("MINERU_FORMULA_ENABLE")
 
     # Run a minimal parse over a single page
     do_parse(

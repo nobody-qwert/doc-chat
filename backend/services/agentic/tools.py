@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 
 # Context expansion settings
 SHORT_DOC_CHUNK_LIMIT = 20  # Fallback heuristic when token counts missing
-SHORT_DOC_TOKEN_LIMIT = 12000  # Prefer full-doc context when total tokens <= this
+SHORT_DOC_TOKEN_LIMIT = 4000  # Prefer full-doc context when total tokens <= this
 EXPANSION_CHUNKS_BEFORE = 10
 EXPANSION_CHUNKS_AFTER = 10
 MAX_EXPANDED_CHUNKS = 20
 EXPANDED_CHAR_MULTIPLIER = 20  # Expand snippet length relative to default context_chars
 MIN_EXPANDED_CHARS = 4000
-MAX_EXPANDED_CHARS = 15000
+MAX_EXPANDED_CHARS = 5000
 
 
 @dataclass

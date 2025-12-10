@@ -6,23 +6,33 @@ from typing import List, Optional
 import numpy as np
 
 
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        raise RuntimeError(f"Missing required environment variable {name}")
+    cleaned = value.strip()
+    if not cleaned:
+        raise RuntimeError(f"Environment variable {name} cannot be empty")
+    return cleaned
+
+
 class EmbeddingClient:
     def __init__(self) -> None:
-        base = (os.environ.get("EMBEDDING_BASE_URL") or "").strip()
-        key = (os.environ.get("EMBEDDING_API_KEY") or "").strip()
-        model = (os.environ.get("EMBEDDING_MODEL") or "").strip()
-        batch_size = os.environ.get("EMBEDDING_BATCH_SIZE") or "1"
-        if not base or not key or not model:
-            raise RuntimeError("EMBEDDING_BASE_URL, EMBEDDING_API_KEY, and EMBEDDING_MODEL must be set")
+        base = _require_env("EMBEDDING_BASE_URL")
+        key = _require_env("EMBEDDING_API_KEY")
+        model = _require_env("EMBEDDING_MODEL")
+        batch_size = _require_env("EMBEDDING_BATCH_SIZE")
         self.base = base
         self.key = key
         self.model = model
         self.dim: Optional[int] = None
         try:
             size_int = int(batch_size)
-        except ValueError:
-            size_int = 1
-        self.max_batch = max(1, size_int)
+        except ValueError as exc:  # pragma: no cover - fail fast on invalid configuration
+            raise RuntimeError(f"EMBEDDING_BATCH_SIZE must be an integer (got {batch_size!r})") from exc
+        if size_int <= 0:
+            raise RuntimeError("EMBEDDING_BATCH_SIZE must be a positive integer")
+        self.max_batch = size_int
 
         from openai import AsyncOpenAI  # type: ignore
 

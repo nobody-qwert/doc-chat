@@ -17,6 +17,16 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def _require_env(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        raise RuntimeError(f"Missing required environment variable {name}")
+    cleaned = value.strip()
+    if not cleaned:
+        raise RuntimeError(f"Environment variable {name} cannot be empty")
+    return cleaned
+
+
 def _startup_logger() -> logging.Logger:
     """Prefer uvicorn's error logger so INFO shows in docker logs."""
     uvicorn_logger = logging.getLogger("uvicorn.error")
@@ -64,31 +74,28 @@ def _log_cuda_status() -> None:
         log.info("CUDA available: True (device inspection failed: %s)", exc)
 
 
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    cleaned = value.strip().lower()
+def _env_bool(name: str) -> bool:
+    cleaned = _require_env(name).lower()
     if cleaned in {"1", "true", "yes", "on"}:
         return True
     if cleaned in {"0", "false", "no", "off"}:
         return False
-    return default
+    raise RuntimeError(f"Environment variable {name} must be a boolean (got {cleaned!r})")
 
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/app_data/docs"))
-INDEX_DIR = Path(os.environ.get("INDEX_DIR", "/app_data/runtime"))
-OCR_OUTPUT_DIR = Path(os.environ.get("OCR_OUTPUT_DIR") or (INDEX_DIR / "ocr_outputs"))
-OCR_INCOMING_DIR = Path(os.environ.get("OCR_INCOMING_DIR") or (INDEX_DIR / "incoming"))
-OCR_WARMUP_DIR = Path(os.environ.get("OCR_WARMUP_DIR") or (INDEX_DIR / "warmup"))
+DATA_DIR = Path(_require_env("DATA_DIR"))
+INDEX_DIR = Path(_require_env("INDEX_DIR"))
+OCR_OUTPUT_DIR = Path(_require_env("OCR_OUTPUT_DIR"))
+OCR_INCOMING_DIR = Path(_require_env("OCR_INCOMING_DIR"))
+OCR_WARMUP_DIR = Path(_require_env("OCR_WARMUP_DIR"))
 for path in (DATA_DIR, INDEX_DIR, OCR_OUTPUT_DIR, OCR_INCOMING_DIR, OCR_WARMUP_DIR):
     path.mkdir(parents=True, exist_ok=True)
 
-MINERU_PARSE_METHOD = (os.environ.get("MINERU_PARSE_METHOD") or "auto").strip().lower()
-MINERU_LANG = (os.environ.get("MINERU_LANG") or "en").strip()
-MINERU_TABLE_ENABLE = _env_bool("MINERU_TABLE_ENABLE", True)
-MINERU_FORMULA_ENABLE = _env_bool("MINERU_FORMULA_ENABLE", True)
-MINERU_WARMUP_ON_STARTUP = _env_bool("MINERU_WARMUP_ON_STARTUP", False)
+MINERU_PARSE_METHOD = _require_env("MINERU_PARSE_METHOD").lower()
+MINERU_LANG = _require_env("MINERU_LANG")
+MINERU_TABLE_ENABLE = _env_bool("MINERU_TABLE_ENABLE")
+MINERU_FORMULA_ENABLE = _env_bool("MINERU_FORMULA_ENABLE")
+MINERU_WARMUP_ON_STARTUP = _env_bool("MINERU_WARMUP_ON_STARTUP")
 
 
 def _utc_now() -> str:
@@ -394,4 +401,11 @@ async def _ensure_ocr_ready() -> None:
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+    port_raw = os.environ.get("PORT")
+    if port_raw is None or not port_raw.strip():
+        raise RuntimeError("PORT environment variable must be set for ocr_module")
+    try:
+        port = int(port_raw)
+    except ValueError as exc:
+        raise RuntimeError(f"PORT must be an integer (got {port_raw!r})") from exc
+    uvicorn.run("app:app", host="0.0.0.0", port=port)

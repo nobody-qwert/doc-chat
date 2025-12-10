@@ -11,6 +11,16 @@ from typing import Any, Dict, Optional, Sequence
 AutoTokenizer: Optional[Any] = None
 
 
+def _require_env(name: str) -> str:
+    raw = os.environ.get(name)
+    if raw is None:
+        raise RuntimeError(f"Missing required environment variable {name}")
+    value = raw.strip()
+    if not value:
+        raise RuntimeError(f"Environment variable {name} cannot be empty")
+    return value
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -30,7 +40,7 @@ _AUTO_IMPORT_ERROR: Optional[str] = None
 _AUTO_IMPORT_LOCK = Lock()
 _AUTO_INSTALL_ATTEMPTED = False
 _AUTO_INSTALL_TRANSFORMERS = _env_bool("AUTO_INSTALL_TRANSFORMERS", True)
-_TRANSFORMERS_SPEC = os.environ.get("TRANSFORMERS_SPEC", "transformers>=4.40")
+_TRANSFORMERS_SPEC = _require_env("TRANSFORMERS_SPEC")
 
 
 def _install_transformers_dependency() -> bool:

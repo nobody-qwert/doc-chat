@@ -24,16 +24,50 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return default
 
 
-LLM_SERVER_CMD = os.environ.get("LLM_SERVER_CMD")
-if not LLM_SERVER_CMD:
-    raise RuntimeError("LLM_SERVER_CMD must be set (e.g., 'python3 -m llama_cpp.server ...')")
+def _require_env(name: str) -> str:
+    raw = os.environ.get(name)
+    if raw is None:
+        raise RuntimeError(f"Missing required environment variable {name}")
+    value = raw.strip()
+    if not value:
+        raise RuntimeError(f"Environment variable {name} cannot be empty")
+    return value
 
-CONTROL_PORT = int(os.environ.get("LLM_CONTROL_PORT", "9000"))
+
+def _int_env(name: str) -> int:
+    value = _require_env(name)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer (got {value!r})") from exc
+
+
+def _float_env(name: str) -> float:
+    value = _require_env(name)
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a float (got {value!r})") from exc
+
+
+def _log_level_env(name: str) -> int:
+    raw = _require_env(name)
+    if raw.isdigit():
+        return int(raw)
+    level = getattr(logging, raw.upper(), None)
+    if isinstance(level, int):
+        return level
+    raise RuntimeError(f"{name} must be a valid logging level (got {raw!r})")
+
+
+LLM_SERVER_CMD = _require_env("LLM_SERVER_CMD")
+
+CONTROL_PORT = _int_env("LLM_CONTROL_PORT")
 AUTO_LOAD = _env_bool("LLM_AUTO_LOAD", True)
-SHUTDOWN_TIMEOUT = float(os.environ.get("LLM_SERVER_SHUTDOWN_TIMEOUT", "30"))
+SHUTDOWN_TIMEOUT = _float_env("LLM_SERVER_SHUTDOWN_TIMEOUT")
 
 logger = logging.getLogger("llm_controller")
-logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+logging.basicConfig(level=_log_level_env("LOG_LEVEL"))
 
 app = FastAPI(title="LLM Controller", version="0.1.0")
 

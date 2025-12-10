@@ -35,5 +35,11 @@ app.include_router(agentic.router)
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("BACKEND_PORT", "8000"))
+    raw_port = os.environ.get("BACKEND_PORT")
+    if raw_port is None or not raw_port.strip():
+        raise RuntimeError("BACKEND_PORT environment variable must be set")
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise RuntimeError(f"BACKEND_PORT must be an integer (got {raw_port!r})") from exc
     uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)

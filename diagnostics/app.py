@@ -131,5 +131,11 @@ async def gpu_route() -> Dict[str, Any]:
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.environ.get("PORT", "9001"))
+    raw_port = os.environ.get("PORT")
+    if raw_port is None or not raw_port.strip():
+        raise RuntimeError("PORT environment variable must be set for diagnostics service")
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise RuntimeError(f"PORT must be an integer (got {raw_port!r})") from exc
     uvicorn.run("app:app", host="0.0.0.0", port=port)
