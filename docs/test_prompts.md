@@ -12,7 +12,7 @@ tell me 550W solar panel dimensions. i need width and height
 tell me 550W solar panel dimensions
 
 
-tell me Laszlo Marias electricity and natural gas consumption bills. i need the period for each bill and the paid value.
+tell me Laszlo Maria's electricity and natural gas consumption bills. i need the period for each bill and the paid value. please give me response in table format.
 
 
 da-mi valorile platite de Laszlo Maria pentru electricitate si gaz din facturi. im trebuie si perioada si valoarea. Dami raspunsul in forma de tabel
