@@ -59,13 +59,10 @@ async def search_text(
             doc_id=doc_id,
         )
         
-        matching_doc_hashes_set = set(matching_doc_hashes)
         doc_token_map = _build_doc_token_map(doc_info_map)
         doc_chunks_cache: Dict[str, List[Dict[str, Any]]] = {}
         doc_text_cache: Dict[str, str] = {}
         search_terms = _prepare_search_terms(query)
-        docs_with_chunks = 0
-        total_chunks_returned = 0
         short_doc_chunk_limit = getattr(settings, "agentic_short_doc_chunk_limit")
         short_doc_token_limit = getattr(settings, "agentic_short_doc_token_limit")
         expansion_before = getattr(settings, "agentic_expansion_chunks_before")
@@ -81,9 +78,6 @@ async def search_text(
             
             for doc_hash in matching_doc_hashes:
                 chunks = await document_store.fetch_chunks(doc_hash=doc_hash)
-                if chunks:
-                    docs_with_chunks += 1
-                    total_chunks_returned += len(chunks)
                 doc_chunks_cache[doc_hash] = chunks
                 doc_info = doc_info_map.get(doc_hash) or await document_store.get_document(doc_hash)
                 doc_total_tokens = doc_token_map.get(doc_hash)
@@ -152,16 +146,6 @@ async def search_text(
             ]
             combined_results.sort(key=lambda x: x.get("score", 0), reverse=True)
             combined_results = combined_results[:top_k]
-        
-        logger.info(
-            "search_text db corpus: processed_docs=%d docs_with_chunks=%d total_chunks=%d results=%d doc_id=%s query=%r",
-            len(matching_doc_hashes_set),
-            docs_with_chunks,
-            total_chunks_returned,
-            len(combined_results),
-            doc_id or "-",
-            (query or "").strip().replace("\n", " ")[:160],
-        )
         return ToolResult(
             tool_name="search_text",
             success=True,
@@ -220,9 +204,6 @@ async def search_semantic(
             doc_id=doc_id,
         )
         matching_doc_hashes_set: Set[str] = set(matching_doc_hashes)
-        db_chunks_returned = 0
-        candidate_count = 0
-        embedding_chunks_total = 0
         doc_token_map = _build_doc_token_map(doc_info_map)
         doc_chunks_cache: Dict[str, List[Dict[str, Any]]] = {}
         doc_text_cache: Dict[str, str] = {}
@@ -232,91 +213,93 @@ async def search_semantic(
         expansion_after = getattr(settings, "agentic_expansion_chunks_after")
         max_window_chunks = getattr(settings, "agentic_max_expanded_chunks")
         expanded_char_limit = _expansion_char_limit(context_chars, settings)
-        results: List[Dict[str, Any]] = []
-        if matching_doc_hashes_set:
-            # Get embedding snapshot
-            snapshot = embedding_cache.snapshot()
-            embedding_chunks_total = snapshot.total
-            if embedding_chunks_total:
-                # Normalize query vector
-                norm = np.linalg.norm(query_vec)
-                if norm > 0:
-                    query_vec = query_vec / norm
-                
-                # Compute similarities
-                scores = snapshot.matrix @ query_vec
 
-                requested_top_k = int(top_k or 1)
-                max_hits = max(1, min(requested_top_k, 10))
-                min_similarity = float(getattr(settings, "min_semantic_similarity", 0.0))
-                
-                # Get top candidates
-                candidate_count = min(snapshot.total, max_hits * 5)  # Fetch extra for filtering
-                if candidate_count > 0:
-                    top_indices = np.argpartition(scores, -candidate_count)[-candidate_count:]
-                    top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
-                else:
-                    top_indices = []
-                
-                # Build results
-                for idx in top_indices:
-                    chunk_id = snapshot.chunk_ids[idx]
-                    score = float(scores[idx])
-                    if score < min_similarity:
-                        break
-                    
-                    # Get chunk info
-                    chunks = await document_store.fetch_chunks_by_ids([chunk_id])
-                    db_chunks_returned += len(chunks)
-                    if not chunks:
-                        continue
-                    
-                    chunk = chunks[0]
-                    doc_hash = chunk.get("doc_hash")
-                    
-                    # Scope to processed documents
-                    if doc_hash not in matching_doc_hashes_set:
-                        continue
-                    
-                    doc_info = doc_info_map.get(doc_hash) or await document_store.get_document(doc_hash)
-                    
-                    results.append({
-                        "doc_hash": doc_hash,
-                        "chunk_id": chunk_id,
-                        "order_index": chunk.get("order_index", 0),
-                        "text": chunk.get("text", "")[:context_chars],
-                        "document_name": doc_info.get("original_name", "Unknown") if doc_info else "Unknown",
-                        "score": score,
-                        "match_type": "semantic",
-                    })
-                    
-                    if len(results) >= max_hits:
-                        break
-                
-                results = await _expand_evidence_chunks(
-                    results,
-                    document_store=document_store,
-                    doc_chunks_cache=doc_chunks_cache,
-                    settings=settings,
-                    doc_text_cache=doc_text_cache,
-                    doc_token_map=doc_token_map,
-                    short_doc_chunk_limit=short_doc_chunk_limit,
-                    short_doc_token_limit=short_doc_token_limit,
-                    expansion_before=expansion_before,
-                    expansion_after=expansion_after,
-                    max_window_chunks=max_window_chunks,
-                    max_chars=expanded_char_limit,
-                )
+        if not matching_doc_hashes_set:
+            return ToolResult(
+                tool_name="search_semantic",
+                success=True,
+                results=[],
+                total_found=0,
+            )
+        
+        # Get embedding snapshot
+        snapshot = embedding_cache.snapshot()
+        if snapshot.total == 0:
+            return ToolResult(
+                tool_name="search_semantic",
+                success=True,
+                results=[],
+                total_found=0,
+            )
+        
+        # Normalize query vector
+        norm = np.linalg.norm(query_vec)
+        if norm > 0:
+            query_vec = query_vec / norm
+        
+        # Compute similarities
+        scores = snapshot.matrix @ query_vec
 
-        logger.info(
-            "search_semantic db corpus: processed_docs=%d embedding_chunks=%d candidate_chunks=%d db_chunks=%d results=%d doc_id=%s query=%r",
-            len(matching_doc_hashes_set),
-            embedding_chunks_total,
-            candidate_count,
-            db_chunks_returned,
-            len(results),
-            doc_id or "-",
-            (query or "").strip().replace("\n", " ")[:160],
+        requested_top_k = int(top_k or 1)
+        max_hits = max(1, min(requested_top_k, 10))
+        min_similarity = float(getattr(settings, "min_semantic_similarity", 0.0))
+        
+        # Get top candidates
+        candidate_count = min(snapshot.total, max_hits * 5)  # Fetch extra for filtering
+        if candidate_count > 0:
+            top_indices = np.argpartition(scores, -candidate_count)[-candidate_count:]
+            top_indices = top_indices[np.argsort(scores[top_indices])[::-1]]
+        else:
+            top_indices = []
+        
+        # Build results
+        results = []
+        for idx in top_indices:
+            chunk_id = snapshot.chunk_ids[idx]
+            score = float(scores[idx])
+            if score < min_similarity:
+                break
+            
+            # Get chunk info
+            chunks = await document_store.fetch_chunks_by_ids([chunk_id])
+            if not chunks:
+                continue
+            
+            chunk = chunks[0]
+            doc_hash = chunk.get("doc_hash")
+            
+            # Scope to processed documents
+            if doc_hash not in matching_doc_hashes_set:
+                continue
+            
+            doc_info = doc_info_map.get(doc_hash) or await document_store.get_document(doc_hash)
+            
+            results.append({
+                "doc_hash": doc_hash,
+                "chunk_id": chunk_id,
+                "order_index": chunk.get("order_index", 0),
+                "text": chunk.get("text", "")[:context_chars],
+                "document_name": doc_info.get("original_name", "Unknown") if doc_info else "Unknown",
+                "score": score,
+                "match_type": "semantic",
+            })
+            
+            if len(results) >= max_hits:
+                break
+        
+        results = await _expand_evidence_chunks(
+            results,
+            document_store=document_store,
+            doc_chunks_cache=doc_chunks_cache,
+            settings=settings,
+            doc_text_cache=doc_text_cache,
+            doc_token_map=doc_token_map,
+            short_doc_chunk_limit=short_doc_chunk_limit,
+            short_doc_token_limit=short_doc_token_limit,
+            expansion_before=expansion_before,
+            expansion_after=expansion_after,
+            max_window_chunks=max_window_chunks,
+            max_chars=expanded_char_limit,
         )
         return ToolResult(
             tool_name="search_semantic",

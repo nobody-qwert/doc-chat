@@ -1,25 +1,11 @@
 from __future__ import annotations
 
-import logging
 import os
 import sys
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-def _configure_logging() -> None:
-    level_name = (os.getenv("APP_LOG_LEVEL") or os.getenv("LOG_LEVEL") or "INFO").upper()
-    level = getattr(logging, level_name, logging.INFO)
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    if not root_logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-        root_logger.addHandler(handler)
-
-
-_configure_logging()
 
 if __package__:
     from .dependencies import lifespan, settings
