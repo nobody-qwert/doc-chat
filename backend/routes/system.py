@@ -61,6 +61,7 @@ def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
             "base_url": env.get("EMBEDDING_BASE_URL", ""),
             "model": env.get("EMBEDDING_MODEL", ""),
             "batch_size": env.get("EMBEDDING_BATCH_SIZE", "1"),
+            "dimensions": env.get("EMBEDDING_DIMENSIONS", ""),
             "context_size": env.get("EMBED_CONTEXT_SIZE", ""),
             "tokenizer_id": settings.embedding_tokenizer_id,
             "tokenizer_loaded": embedding_tok.get("loaded"),
@@ -80,6 +81,7 @@ def _settings_snapshot() -> Dict[str, Dict[str, Any]]:
         },
         "retrieval": {
             "min_context_similarity": settings.min_context_similarity,
+            "min_keyword_score": settings.min_keyword_score,
         },
         "storage": {
             "data_dir": str(settings.data_dir),
