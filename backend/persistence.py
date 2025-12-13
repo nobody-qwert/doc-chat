@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,9 +58,6 @@ class DocumentStore:
                         token_count INTEGER,
                         status TEXT NOT NULL,
                         error TEXT,
-                        classification_status TEXT NOT NULL DEFAULT 'pending',
-                        classification_error TEXT,
-                        last_classified_at TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
                         last_ingested_at TEXT
@@ -149,26 +145,6 @@ class DocumentStore:
                         embedding_time_sec REAL,
                         total_time_sec REAL,
                         created_at TEXT NOT NULL,
-                        FOREIGN KEY(doc_hash) REFERENCES documents(doc_hash) ON DELETE CASCADE
-                    )
-                    """
-                )
-
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS document_classifications (
-                        doc_hash TEXT PRIMARY KEY,
-                        l1_id TEXT NOT NULL,
-                        l1_name TEXT,
-                        l2_id TEXT,
-                        l2_name TEXT,
-                        l1_confidence TEXT,
-                        l2_confidence TEXT,
-                        l1_reason TEXT,
-                        l2_reason TEXT,
-                        model TEXT,
-                        raw_response TEXT,
-                        updated_at TEXT NOT NULL,
                         FOREIGN KEY(doc_hash) REFERENCES documents(doc_hash) ON DELETE CASCADE
                     )
                     """
@@ -296,15 +272,11 @@ class DocumentStore:
         conn = await self._conn()
         now = _utc_now()
         try:
-            await conn.execute("DELETE FROM document_classifications WHERE doc_hash=?", (doc_hash,))
             await conn.execute(
                 """
                 UPDATE documents
                 SET status='processed',
                     error=NULL,
-                    classification_status='pending',
-                    classification_error=NULL,
-                    last_classified_at=NULL,
                     updated_at=?,
                     last_ingested_at=?
                 WHERE doc_hash=?
@@ -352,7 +324,7 @@ class DocumentStore:
         conn = await self._conn()
         try:
             await conn.execute("BEGIN")
-            for table in ("performance_metrics", "embeddings", "chunks", "extractions", "document_classifications", "jobs"):
+            for table in ("performance_metrics", "embeddings", "chunks", "extractions", "jobs"):
                 await conn.execute(f"DELETE FROM {table} WHERE doc_hash=?", (doc_hash,))
             cur = await conn.execute("DELETE FROM documents WHERE doc_hash=?", (doc_hash,))
             await conn.commit()
@@ -660,139 +632,25 @@ class DocumentStore:
         finally:
             await conn.close()
 
-    # Classification
-    async def update_classification_status(self, doc_hash: str, status: str, *, error: Optional[str] = None) -> None:
+    async def clear_postprocess_data(self, doc_hash: str) -> None:
+        """Delete derived retrieval artifacts for a document (chunks/embeddings/metrics)."""
         conn = await self._conn()
         try:
-            await conn.execute(
-                """
-                UPDATE documents
-                SET classification_status=?,
-                    classification_error=?,
-                    updated_at=?
-                WHERE doc_hash=?
-                """,
-                (status, error, _utc_now(), doc_hash),
-            )
+            await conn.execute("DELETE FROM performance_metrics WHERE doc_hash=?", (doc_hash,))
+            await conn.execute("DELETE FROM embeddings WHERE doc_hash=?", (doc_hash,))
+            await conn.execute("DELETE FROM chunks WHERE doc_hash=?", (doc_hash,))
             await conn.commit()
         finally:
             await conn.close()
 
-    async def clear_classification(self, doc_hash: str) -> None:
+    async def clear_all_postprocess_data(self) -> None:
+        """Delete derived retrieval artifacts for all documents (chunks/embeddings/metrics)."""
         conn = await self._conn()
-        now = _utc_now()
         try:
-            await conn.execute("DELETE FROM document_classifications WHERE doc_hash=?", (doc_hash,))
-            await conn.execute(
-                """
-                UPDATE documents
-                SET classification_status='pending',
-                    classification_error=NULL,
-                    last_classified_at=NULL,
-                    updated_at=?
-                WHERE doc_hash=?
-                """,
-                (now, doc_hash),
-            )
+            await conn.execute("DELETE FROM performance_metrics")
+            await conn.execute("DELETE FROM embeddings")
+            await conn.execute("DELETE FROM chunks")
             await conn.commit()
-        finally:
-            await conn.close()
-
-    async def save_document_classification(
-        self,
-        doc_hash: str,
-        *,
-        l1_id: str,
-        l1_name: Optional[str],
-        l2_id: Optional[str],
-        l2_name: Optional[str],
-        l1_confidence: Optional[str],
-        l2_confidence: Optional[str],
-        l1_reason: Optional[str],
-        l2_reason: Optional[str],
-        model: Optional[str],
-        raw_response: Optional[Dict[str, Any]],
-    ) -> None:
-        conn = await self._conn()
-        now = _utc_now()
-        raw_json = json.dumps(raw_response or {}, ensure_ascii=False)
-        try:
-            await conn.execute(
-                """
-                INSERT INTO document_classifications (
-                    doc_hash, l1_id, l1_name, l2_id, l2_name,
-                    l1_confidence, l2_confidence, l1_reason, l2_reason,
-                    model, raw_response, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(doc_hash) DO UPDATE SET
-                    l1_id=excluded.l1_id,
-                    l1_name=excluded.l1_name,
-                    l2_id=excluded.l2_id,
-                    l2_name=excluded.l2_name,
-                    l1_confidence=excluded.l1_confidence,
-                    l2_confidence=excluded.l2_confidence,
-                    l1_reason=excluded.l1_reason,
-                    l2_reason=excluded.l2_reason,
-                    model=excluded.model,
-                    raw_response=excluded.raw_response,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    doc_hash,
-                    l1_id,
-                    l1_name,
-                    l2_id,
-                    l2_name,
-                    l1_confidence,
-                    l2_confidence,
-                    l1_reason,
-                    l2_reason,
-                    model,
-                    raw_json,
-                    now,
-                ),
-            )
-            await conn.execute(
-                """
-                UPDATE documents
-                SET classification_status='classified',
-                    classification_error=NULL,
-                    last_classified_at=?,
-                    updated_at=?
-                WHERE doc_hash=?
-                """,
-                (now, now, doc_hash),
-            )
-            await conn.commit()
-        finally:
-            await conn.close()
-
-    async def get_classification(self, doc_hash: str) -> Optional[Dict[str, Any]]:
-        conn = await self._conn()
-        try:
-            cur = await conn.execute(
-                """
-                SELECT doc_hash, l1_id, l1_name, l2_id, l2_name,
-                       l1_confidence, l2_confidence, l1_reason, l2_reason,
-                       model, raw_response, updated_at
-                FROM document_classifications
-                WHERE doc_hash=?
-                """,
-                (doc_hash,),
-            )
-            row = await cur.fetchone()
-            await cur.close()
-            if not row:
-                return None
-            data = dict(row)
-            raw = data.get("raw_response")
-            if isinstance(raw, str):
-                try:
-                    data["raw_response"] = json.loads(raw)
-                except json.JSONDecodeError:
-                    pass
-            return data
         finally:
             await conn.close()
 

@@ -14,7 +14,6 @@ try:
 except ImportError:  # pragma: no cover
     from embeddings import EmbeddingClient  # type: ignore
 
-from .classification import classify_document_text
 from .context import document_store, gpu_phase_manager, jobs_registry, settings
 from .models import QueuedBatchDoc, QueuedBatchJob
 from .ocr import call_ocr_module
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 _job_queue: "asyncio.Queue[QueuedBatchJob]" = asyncio.Queue()
 _worker_task: Optional["asyncio.Task[None]"] = None
 _worker_lock = asyncio.Lock()
-DEFAULT_PHASES: List[str] = ["ocr", "postprocess", "classification"]
+DEFAULT_PHASES: List[str] = ["ocr", "postprocess"]
 
 
 async def queue_batch_job(docs: Sequence[QueuedBatchDoc], *, phases: Optional[Sequence[str]] = None) -> str:
@@ -74,26 +73,6 @@ async def queue_postprocess_job(doc_hashes: Sequence[str], *, phases: Optional[S
         )
     requested_phases = list(phases) if phases else ["postprocess"]
     return await queue_batch_job(prepared_docs, phases=requested_phases)
-
-
-async def queue_classification_job(doc_hashes: Sequence[str]) -> str:
-    if not doc_hashes:
-        raise HTTPException(status_code=400, detail="No documents to classify")
-    prepared_docs: List[QueuedBatchDoc] = []
-    for doc_hash in doc_hashes:
-        doc = await document_store.get_document(doc_hash)
-        if not doc:
-            raise HTTPException(status_code=404, detail=f"Document {doc_hash} not found")
-        stored_name = doc.get("stored_name") or doc_hash
-        display_name = doc.get("original_name") or stored_name
-        prepared_docs.append(
-            QueuedBatchDoc(
-                doc_path=settings.data_dir / stored_name,
-                doc_hash=doc_hash,
-                display_name=display_name,
-            )
-        )
-    return await queue_batch_job(prepared_docs, phases=["classification"])
 
 
 async def ensure_worker_running() -> None:
@@ -144,8 +123,6 @@ def _init_job_entry(job_id: str, docs: Sequence[QueuedBatchDoc], *, phases: Sequ
 async def _ensure_phase_resources(phase: str, job_id: str) -> None:
     if phase in {"ocr", "postprocess"}:
         await gpu_phase_manager.switch_to_no_llm(reason=f"{phase}:{job_id}")
-    elif phase == "classification":
-        await gpu_phase_manager.ensure_llm_ready()
 
 
 def _set_job_progress(job_id: str, phase: str, percent: float, *, stage: Optional[str] = None, **extra: Any) -> None:
@@ -259,19 +236,6 @@ async def _process_job(job_id: str, docs: Sequence[QueuedBatchDoc], phases: Sequ
             current_docs = [doc for doc in current_docs if doc_by_hash.get(doc.doc_hash, {}).get("status") != "error"]
             if not current_docs:
                 break
-            continue
-
-        if phase_name == "classification":
-            classification_errors = await _run_classification_phase(
-                job_id,
-                current_docs,
-                doc_by_hash,
-                context.get("ocr_payloads") or {},
-                start_percent=start_pct,
-                end_percent=end_pct,
-            )
-            had_errors = had_errors or bool(classification_errors)
-            current_docs = [doc for doc in current_docs if doc_by_hash.get(doc.doc_hash, {}).get("status") != "error"]
             continue
 
         logger.warning("Unknown phase '%s' for job %s; skipping", phase_name, job_id)
@@ -533,114 +497,4 @@ async def _run_postprocess_phase(
     return errors
 
 
-async def _run_classification_phase(
-    job_id: str,
-    docs: Sequence[QueuedBatchDoc],
-    doc_by_hash: Dict[str, Dict[str, Any]],
-    ocr_payloads: Dict[str, Dict[str, Any]],
-    *,
-    start_percent: float = 0.0,
-    end_percent: float = 100.0,
-) -> Dict[str, str]:
-    total_docs = len(docs)
-    _set_job_progress(job_id, "classification", start_percent, stage="starting", total_docs=total_docs)
-    if total_docs == 0:
-        _set_job_progress(job_id, "classification", end_percent, stage="empty")
-        return {}
-    phase_span = max(0.0, end_percent - start_percent)
-    completed = 0
-    errors: Dict[str, str] = {}
-
-    for doc in docs:
-        doc_entry = doc_by_hash.get(doc.doc_hash)
-        if not doc_entry:
-            continue
-        payload = await _get_ocr_payload_for_doc(doc.doc_hash, ocr_payloads)
-        ocr_text = (payload.get("text") or "").strip()
-        if not ocr_text:
-            error_msg = "missing_ocr_text"
-            errors[doc.doc_hash] = error_msg
-            doc_entry["status"] = "error"
-            _update_doc_progress(doc_entry, "classification", 0.0, stage="failed", error=error_msg)
-            await document_store.update_classification_status(doc.doc_hash, "error", error=error_msg)
-            if doc.job_record_id:
-                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
-                doc.job_record_id = None
-            completed += 1
-            percent = start_percent + (completed / total_docs) * phase_span if total_docs else end_percent
-            _set_job_progress(job_id, "classification", percent, stage=f"{completed}/{total_docs}")
-            continue
-
-        doc_entry["status"] = "classification_running"
-        _update_doc_progress(doc_entry, "classification", 0.0, stage="starting")
-        await document_store.update_classification_status(doc.doc_hash, "running")
-
-        try:
-            result = await classify_document_text(
-                doc_hash=doc.doc_hash,
-                text=ocr_text,
-                document_name=doc.display_name,
-            )
-            await document_store.save_document_classification(
-                doc.doc_hash,
-                l1_id=result["l1_id"],
-                l1_name=result.get("l1_name"),
-                l2_id=result.get("l2_id"),
-                l2_name=result.get("l2_name"),
-                l1_confidence=result.get("l1_confidence"),
-                l2_confidence=result.get("l2_confidence"),
-                l1_reason=result.get("l1_reason"),
-                l2_reason=result.get("l2_reason"),
-                model=result.get("model"),
-                raw_response=result.get("raw_response"),
-            )
-            doc_entry["status"] = "classification_completed"
-            _update_doc_progress(
-                doc_entry,
-                "classification",
-                100.0,
-                stage="done",
-                classification=result,
-            )
-            if doc.job_record_id:
-                await document_store.finish_job(doc.job_record_id, "done")
-                doc.job_record_id = None
-        except HTTPException as exc:
-            detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
-            error_msg = detail or f"Classification failed ({exc.status_code})"
-            errors[doc.doc_hash] = error_msg
-            doc_entry["status"] = "error"
-            _update_doc_progress(
-                doc_entry,
-                "classification",
-                doc_entry.get("progress", {}).get("percent", 0.0),
-                stage="failed",
-                error=error_msg,
-            )
-            await document_store.update_classification_status(doc.doc_hash, "error", error=error_msg)
-            if doc.job_record_id:
-                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
-                doc.job_record_id = None
-            logger.exception("Classification failed for %s: %s", doc.doc_hash, error_msg)
-        except Exception as exc:  # pragma: no cover
-            error_msg = str(exc)
-            errors[doc.doc_hash] = error_msg
-            doc_entry["status"] = "error"
-            _update_doc_progress(
-                doc_entry,
-                "classification",
-                doc_entry.get("progress", {}).get("percent", 0.0),
-                stage="failed",
-                error=error_msg,
-            )
-            await document_store.update_classification_status(doc.doc_hash, "error", error=error_msg)
-            if doc.job_record_id:
-                await document_store.finish_job(doc.job_record_id, "error", error=error_msg)
-                doc.job_record_id = None
-            logger.exception("Classification failed for %s: %s", doc.doc_hash, exc)
-        finally:
-            completed += 1
-            percent = start_percent + (completed / total_docs) * phase_span if total_docs else end_percent
-            _set_job_progress(job_id, "classification", percent, stage=f"{completed}/{total_docs}")
-
-    return errors
+ 

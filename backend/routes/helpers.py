@@ -28,7 +28,4 @@ def format_document_row(doc: Dict[str, Any]) -> Dict[str, Any]:
         "error": doc.get("error"),
         "updated_at": doc.get("updated_at"),
         "created_at": doc.get("created_at"),
-        "classification_status": doc.get("classification_status"),
-        "classification_error": doc.get("classification_error"),
-        "last_classified_at": doc.get("last_classified_at"),
     }

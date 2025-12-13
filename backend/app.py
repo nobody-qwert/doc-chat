@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -7,13 +8,26 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+def _configure_logging() -> None:
+    level_name = (os.getenv("APP_LOG_LEVEL") or os.getenv("LOG_LEVEL") or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        root_logger.addHandler(handler)
+
+
+_configure_logging()
+
 if __package__:
     from .dependencies import lifespan, settings
-    from .routes import agentic, chat, documents, extraction, ingest, system
+    from .routes import agentic, chat, documents, ingest, system
 else:  # pragma: no cover - script execution fallback
     sys.path.append(str(Path(__file__).resolve().parent))
     from dependencies import lifespan, settings  # type: ignore
-    from routes import agentic, chat, documents, extraction, ingest, system  # type: ignore
+    from routes import agentic, chat, documents, ingest, system  # type: ignore
 
 app = FastAPI(title="RAG Backend", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
@@ -28,7 +42,6 @@ app.include_router(system.router)
 app.include_router(documents.router)
 app.include_router(ingest.router)
 app.include_router(chat.router)
-app.include_router(extraction.router)
 app.include_router(agentic.router)
 
 

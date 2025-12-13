@@ -62,8 +62,6 @@ function formatProgressDetails(progress) {
   return parts.join(" ").trim();
 }
 
-const ENABLE_INVOICE_EXTRACTION = String(import.meta.env.VITE_ENABLE_INVOICE_EXTRACTION || "").toLowerCase() === "true";
-
 const styles = {
   page: {
     display: "grid",
@@ -212,7 +210,6 @@ const styles = {
   },
   previewStatsItem: { whiteSpace: "nowrap" },
   previewStatsLabel: { opacity: 0.65, marginRight: 4 },
-  previewStatsClassification: { display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", color: "rgba(226, 232, 240, 0.95)" },
   previewMetaLayout: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 },
   previewMetaBlock: {
     borderRadius: 18,
@@ -322,7 +319,6 @@ export default function IngestPage({ systemStatus = {} }) {
     retry: (hash) => `/api/ingest/${hash}/retry`,
     preprocess: (hash) => `/api/ingest/${hash}/preprocess`,
     reprocessAll: "/api/ingest/reprocess_all",
-    classify: (hash) => `/api/ingest/${hash}/classify`,
     previewText: (hash, maxChars = null, parser = FALLBACK_PARSER) => {
       const params = new URLSearchParams({ parser });
       if (typeof maxChars === "number" && Number.isFinite(maxChars)) {
@@ -330,9 +326,6 @@ export default function IngestPage({ systemStatus = {} }) {
       }
       return `/api/debug/parsed_text/${hash}?${params.toString()}`;
     },
-    extractionStats: (schemaId) => `/api/extraction/stats/${schemaId}`,
-    extractionExtract: "/api/extraction/extract",
-    extractionMetadata: (schemaId, docHash) => `/api/extraction/metadata/${schemaId}/${docHash}`,
   }), []);
 
   const [docs, setDocs] = useState([]);
@@ -344,7 +337,6 @@ export default function IngestPage({ systemStatus = {} }) {
   const [retryingHash, setRetryingHash] = useState(null);
   const [reprocessingHash, setReprocessingHash] = useState(null);
   const [reprocessingAll, setReprocessingAll] = useState(false);
-  const [classifyingHash, setClassifyingHash] = useState(null);
   const [deletingHash, setDeletingHash] = useState(null);
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [preview, setPreview] = useState("");
@@ -357,12 +349,6 @@ export default function IngestPage({ systemStatus = {} }) {
   const parser = FALLBACK_PARSER;
   const [expandedPerf, setExpandedPerf] = useState(new Set());
   const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
-  // Extraction state
-  const [extractionStats, setExtractionStats] = useState(null);
-  const [extractingAll, setExtractingAll] = useState(false);
-  const [extractingHash, setExtractingHash] = useState(null);
-  const [extractedMetadata, setExtractedMetadata] = useState(null);
-  const [extractedDocsSet, setExtractedDocsSet] = useState(new Set());
   const fileInputRef = useRef(null);
   const selectedDocRef = useRef(null);
   const lastPreviewParamsRef = useRef({ previewMaxChars, limitPreview });
@@ -542,37 +528,6 @@ export default function IngestPage({ systemStatus = {} }) {
     return results;
   }, [jobQueueEntries, uploadProgress, documentQueueEntries]);
 
-  const classificationInfo = selectedDoc?.classification || null;
-  const classificationStatusRaw = selectedDoc?.classification_status || selectedDoc?.classificationStatus || "";
-  const classificationStatus = normalizeStatus(classificationStatusRaw);
-  const classificationReady = Boolean(classificationInfo) && classificationStatus === "classified";
-  const classificationInProgress = classificationStatus === "running" || classificationStatus === "queued";
-  const classificationErrorMessage = selectedDoc?.classification_error || selectedDoc?.classificationError || "";
-  const hasSelectedDoc = Boolean(selectedDoc);
-  let classificationPrimaryText = hasSelectedDoc ? "Classification pending." : "";
-  let classificationSupplementalText = "";
-  if (hasSelectedDoc) {
-    if (classificationReady) {
-      const targetParts = [classificationInfo.l1_name || classificationInfo.l1_id || "Category"];
-      if (classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_name}`);
-      else if (classificationInfo.l2_id && !classificationInfo.l2_name) targetParts.push(`→ ${classificationInfo.l2_id}`);
-      classificationPrimaryText = targetParts.join(" ");
-    } else if (classificationStatus === "error") {
-      classificationPrimaryText = "Classification failed.";
-      classificationSupplementalText = classificationErrorMessage || "";
-    } else if (classificationInProgress) {
-      classificationPrimaryText = "Classification running…";
-      classificationSupplementalText = "Hang tight—this will update once the model finishes.";
-    } else {
-      classificationPrimaryText = "Classification pending.";
-      classificationSupplementalText = "Trigger classification from the document library to populate this section.";
-    }
-  }
-  const classificationInlineText = hasSelectedDoc
-    ? (classificationSupplementalText
-        ? `${classificationPrimaryText} (${classificationSupplementalText})`
-        : classificationPrimaryText)
-    : "";
   const summaryRaw = typeof selectedDoc?.summary === "string" ? selectedDoc.summary.trim() : "";
   const summaryDisplayText = summaryRaw || "Summary will be shown here.";
 
@@ -742,34 +697,29 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const handleReprocessAll = useCallback(async () => {
     setReprocessingAll(true);
-    setUploadStatus("Queueing bulk reprocess + reclassify...");
+    setUploadStatus("Queueing bulk reprocess...");
     try {
       const res = await fetch(api.reprocessAll, { method: "POST" });
       const data = await readJsonSafe(res);
       if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
       const jobId = data.postprocess_job_id || data.job_id;
-      const classificationJobId = data.classification_job_id;
       const queuedDocs = Number(data.queued_docs ?? data.total_docs ?? 0) || 0;
       const skipped = Number(data.skipped ?? 0) || 0;
-      if (jobId || classificationJobId) {
+      if (jobId) {
         setActiveJobs(prev => {
           const next = new Set(prev);
           if (jobId) next.add(jobId);
-          if (classificationJobId) next.add(classificationJobId);
           return next;
         });
-        const summaryParts = [`Queued reprocess + reclassify for ${queuedDocs} document${queuedDocs === 1 ? "" : "s"}`];
+        const summaryParts = [`Queued reprocess for ${queuedDocs} document${queuedDocs === 1 ? "" : "s"}`];
         if (skipped > 0) summaryParts.push(`${skipped} skipped`);
-        if (jobId) summaryParts.push(`chunks job ${jobId}`);
-        if (classificationJobId && classificationJobId !== jobId) {
-          summaryParts.push(`class job ${classificationJobId}`);
-        }
+        summaryParts.push(`job ${jobId}`);
         setUploadStatus(summaryParts.join(" • "));
       } else {
         if (skipped > 0) {
           setUploadStatus(`No eligible documents. ${skipped} skipped.`);
         } else {
-          setUploadStatus("No documents to reprocess/reclassify.");
+          setUploadStatus("No documents to reprocess.");
         }
       }
       void refreshDocs();
@@ -779,30 +729,6 @@ export default function IngestPage({ systemStatus = {} }) {
       setReprocessingAll(false);
     }
   }, [api.reprocessAll, refreshDocs]);
-
-  const handleReclassify = useCallback(async (hash) => {
-    if (!hash) return;
-    const short = shortHash(hash);
-    setClassifyingHash(hash);
-    setUploadStatus(`Reclassifying ${short}...`);
-    try {
-      const res = await fetch(api.classify(hash), { method: "POST" });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const jobId = data.job_id;
-      if (jobId) {
-        setActiveJobs(prev => new Set([...prev, jobId]));
-        setUploadStatus(`Classification queued for ${short} • job ${jobId}`);
-      } else {
-        setUploadStatus(`Classification queued for ${short}`);
-      }
-      await refreshDocs();
-    } catch (e) {
-      setUploadStatus(`Classification failed: ${e.message || String(e)}`);
-    } finally {
-      setClassifyingHash(null);
-    }
-  }, [api.classify, refreshDocs]);
 
   const handleDeleteDoc = useCallback(async (doc) => {
     if (!doc?.hash) return;
@@ -982,127 +908,6 @@ export default function IngestPage({ systemStatus = {} }) {
 
   const handleDiagnosticsPanelChange = useCallback((panelKey) => setActiveDiagnosticsPanel(panelKey), []);
 
-  // Fetch extraction stats
-  const refreshExtractionStats = useCallback(async () => {
-    try {
-      const res = await fetch(api.extractionStats("invoices"));
-      if (!res.ok) return;
-      const data = await readJsonSafe(res);
-      setExtractionStats(data);
-      if (Array.isArray(data.extracted_docs)) {
-        setExtractedDocsSet(new Set(data.extracted_docs));
-      }
-    } catch {
-      // Extraction stats not available
-    }
-  }, [api]);
-
-  // Refresh extraction stats on mount and after docs refresh
-  useEffect(() => {
-    void refreshExtractionStats();
-  }, [refreshExtractionStats, docs]);
-
-  // Handle bulk extraction
-  const handleExtractAll = useCallback(async () => {
-    setExtractingAll(true);
-    setUploadStatus("Running metadata extraction...");
-    try {
-      const res = await fetch(api.extractionExtract, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schema_id: "invoices" }),
-      });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const extracted = Number(data.extracted ?? 0);
-      const skipped = Number(data.skipped ?? 0);
-      const errors = Number(data.errors ?? 0);
-      const parts = [`Extracted ${extracted} document${extracted === 1 ? "" : "s"}`];
-      if (skipped > 0) parts.push(`${skipped} skipped`);
-      if (errors > 0) parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
-      setUploadStatus(parts.join(" • "));
-      void refreshExtractionStats();
-    } catch (e) {
-      setUploadStatus(`Extraction failed: ${e.message || String(e)}`);
-    } finally {
-      setExtractingAll(false);
-    }
-  }, [api.extractionExtract, refreshExtractionStats]);
-
-  // Handle single document extraction
-  const handleExtractDoc = useCallback(async (hash) => {
-    if (!hash) return;
-    const short = shortHash(hash);
-    setExtractingHash(hash);
-    setUploadStatus(`Extracting metadata for ${short}...`);
-    try {
-      const res = await fetch(api.extractionExtract, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ schema_id: "invoices", doc_hashes: [hash] }),
-      });
-      const data = await readJsonSafe(res);
-      if (!res.ok) throw new Error((data && (data.detail || data.error || data.raw)) || res.statusText);
-      const extracted = Number(data.extracted ?? 0);
-      if (extracted > 0) {
-        setUploadStatus(`Extracted metadata for ${short}`);
-        setExtractedDocsSet(prev => new Set([...prev, hash]));
-      } else {
-        setUploadStatus(`No metadata extracted for ${short}`);
-      }
-      void refreshExtractionStats();
-    } catch (e) {
-      setUploadStatus(`Extraction failed: ${e.message || String(e)}`);
-    } finally {
-      setExtractingHash(null);
-    }
-  }, [api.extractionExtract, refreshExtractionStats]);
-
-  // Fetch extracted metadata for selected document
-  const fetchExtractedMetadata = useCallback(async (hash) => {
-    if (!hash) {
-      setExtractedMetadata(null);
-      return;
-    }
-    try {
-      const res = await fetch(api.extractionMetadata("invoices", hash));
-      if (!res.ok) {
-        setExtractedMetadata(null);
-        return;
-      }
-      const data = await readJsonSafe(res);
-      setExtractedMetadata(data);
-    } catch {
-      setExtractedMetadata(null);
-    }
-  }, [api]);
-
-  // Fetch metadata when selected doc changes
-  useEffect(() => {
-    if (selectedDoc?.hash) {
-      void fetchExtractedMetadata(selectedDoc.hash);
-    } else {
-      setExtractedMetadata(null);
-    }
-  }, [selectedDoc?.hash, fetchExtractedMetadata]);
-
-  // Extraction stats computed values
-  const invoiceDocsCount = useMemo(() => {
-    // Count docs classified as invoices
-    return displayDocs.filter(d => {
-      const classInfo = d.classification || {};
-      return classInfo.l2_id === "invoices" || classInfo.l2_name?.toLowerCase() === "invoices";
-    }).length;
-  }, [displayDocs]);
-
-  const pendingExtractionCount = useMemo(() => {
-    return displayDocs.filter(d => {
-      const classInfo = d.classification || {};
-      const isInvoice = classInfo.l2_id === "invoices" || classInfo.l2_name?.toLowerCase() === "invoices";
-      return isInvoice && !extractedDocsSet.has(d.hash);
-    }).length;
-  }, [displayDocs, extractedDocsSet]);
-
   return (
     <div style={{ position: "relative" }}>
       <DiagnosticsPanel
@@ -1242,14 +1047,6 @@ export default function IngestPage({ systemStatus = {} }) {
                         <span style={styles.previewStatsLabel}>Embeddings:</span>
                         {Number(previewInfo.total_embeddings || previewInfo.chunk_count || 0).toLocaleString()}
                       </span>
-                      {hasSelectedDoc && (
-                        <span style={{ ...styles.previewStatsItem, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                          <span style={styles.previewStatsLabel}>Classification:</span>
-                          <span style={styles.previewStatsClassification}>
-                            {classificationInlineText}
-                          </span>
-                        </span>
-                      )}
                     </div>
                   )}
                   <div style={styles.previewMetaLayout}>
@@ -1269,49 +1066,6 @@ export default function IngestPage({ systemStatus = {} }) {
                         </div>
                       )}
                     </div>
-                    {extractedMetadata && (
-                      <div style={{ ...styles.previewMetaBlock, background: "rgba(251, 191, 36, 0.08)" }}>
-                        <span style={{ ...styles.previewMetaTitle, color: "rgba(251, 191, 36, 0.9)" }}>
-                          📋 Extracted Invoice Data
-                        </span>
-                        <div style={{ ...styles.previewMetaBody, display: "flex", flexDirection: "column", gap: 4 }}>
-                          {extractedMetadata.vendor_name && (
-                            <div><span style={{ opacity: 0.65 }}>Vendor:</span> {extractedMetadata.vendor_name}</div>
-                          )}
-                          {extractedMetadata.invoice_number && (
-                            <div><span style={{ opacity: 0.65 }}>Invoice #:</span> {extractedMetadata.invoice_number}</div>
-                          )}
-                          {extractedMetadata.invoice_date && (
-                            <div><span style={{ opacity: 0.65 }}>Date:</span> {extractedMetadata.invoice_date}</div>
-                          )}
-                          {extractedMetadata.due_date && (
-                            <div><span style={{ opacity: 0.65 }}>Due:</span> {extractedMetadata.due_date}</div>
-                          )}
-                          {(extractedMetadata.total_amount || extractedMetadata.currency) && (
-                            <div>
-                              <span style={{ opacity: 0.65 }}>Total:</span>{" "}
-                              {extractedMetadata.currency && `${extractedMetadata.currency} `}
-                              {extractedMetadata.total_amount || "—"}
-                            </div>
-                          )}
-                          {extractedMetadata.line_items_json && (
-                            <details style={{ marginTop: 4 }}>
-                              <summary style={{ cursor: "pointer", fontSize: 12, opacity: 0.75 }}>
-                                Line items ({(() => { try { return JSON.parse(extractedMetadata.line_items_json).length; } catch { return 0; } })()})
-                              </summary>
-                              <pre style={{ fontSize: 11, margin: "6px 0 0", padding: 8, background: "rgba(0,0,0,0.2)", borderRadius: 8, overflow: "auto", maxHeight: 150 }}>
-                                {(() => { try { return JSON.stringify(JSON.parse(extractedMetadata.line_items_json), null, 2); } catch { return extractedMetadata.line_items_json; } })()}
-                              </pre>
-                            </details>
-                          )}
-                        </div>
-                        {extractedMetadata.extracted_at && (
-                          <div style={styles.previewMetaFooter}>
-                            Extracted {formatDate(extractedMetadata.extracted_at)}
-                          </div>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1386,20 +1140,6 @@ export default function IngestPage({ systemStatus = {} }) {
             <span style={styles.muted}>{`${systemStatus.docs_count || 0} ready / ${systemStatus.total_docs || displayDocs.length}`}</span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "nowrap", justifyContent: "flex-end", alignItems: "center", minWidth: 0, flexShrink: 0 }}>
-            {ENABLE_INVOICE_EXTRACTION && invoiceDocsCount > 0 && (
-              <button
-                onClick={handleExtractAll}
-                disabled={extractingAll || pendingExtractionCount === 0}
-                style={{
-                  ...styles.subtleButton,
-                  background: "linear-gradient(135deg, rgba(251, 191, 36, 0.85), rgba(245, 158, 11, 0.75))",
-                  opacity: extractingAll || pendingExtractionCount === 0 ? 0.5 : 1,
-                }}
-                title={pendingExtractionCount === 0 ? "All invoices already extracted" : `Extract metadata from ${pendingExtractionCount} invoice${pendingExtractionCount === 1 ? "" : "s"}`}
-              >
-                {extractingAll ? "Extracting…" : `Extract Invoices${pendingExtractionCount > 0 ? ` (${pendingExtractionCount})` : ""}`}
-              </button>
-            )}
             <button
               onClick={handleReprocessAll}
               disabled={reprocessingAll || displayDocs.length === 0}
@@ -1471,54 +1211,6 @@ export default function IngestPage({ systemStatus = {} }) {
                 const showRetryOcr = showRetry && !ocrAvailable;
                 const showRetryPreprocess = showRetry && ocrAvailable && !embeddingsAvailable;
                 const showGeneralRetry = showRetry && !showRetryOcr && !showRetryPreprocess;
-                const classificationStatusRaw = d.classification_status || d.classificationStatus;
-                const classificationStatus = normalizeStatus(classificationStatusRaw);
-                const classificationInfo = d.classification || null;
-                const classificationError = d.classification_error || d.classificationError || "";
-                const classificationReady = classificationStatus === "classified" && classificationInfo;
-                const classificationInProgress = classificationStatus === "running" || classificationStatus === "queued";
-                const classificationLabel = classificationReady
-                  ? "CLASSIFICATION READY"
-                  : classificationStatus === "error"
-                    ? "CLASSIFICATION ERROR"
-                    : classificationInProgress
-                      ? "CLASSIFYING"
-                      : "CLASSIFICATION PENDING";
-                const classificationBadgeStyle = classificationStatus === "classified"
-                  ? styles.docStageReady
-                  : classificationStatus === "error"
-                    ? styles.docStageError
-                    : styles.docStagePending;
-                const classificationTooltip = classificationReady
-                  ? [
-                      classificationInfo.l1_name || classificationInfo.l1_id,
-                      classificationInfo.l2_name ? `→ ${classificationInfo.l2_name}` : "",
-                      classificationInfo.l2_id && !classificationInfo.l2_name ? `→ ${classificationInfo.l2_id}` : "",
-                      classificationInfo.l1_confidence ? `L1 confidence: ${classificationInfo.l1_confidence}` : "",
-                      classificationInfo.l2_confidence ? `L2 confidence: ${classificationInfo.l2_confidence}` : "",
-                    ].filter(Boolean).join("\n") || undefined
-                  : (classificationError || undefined);
-                const canReclassify = Boolean(d.hash && isCompleted);
-                const reclassifyDisabled = classificationInProgress || classifyingHash === d.hash;
-                const classificationReclassHint = "Click to re-run classification for this document";
-                const classificationBadgeTitle = canReclassify
-                  ? (classificationTooltip ? `${classificationTooltip}\n\n${classificationReclassHint}` : classificationReclassHint)
-                  : classificationTooltip || undefined;
-                const classificationBadgeCommonStyle = { ...styles.docStageBadge, ...classificationBadgeStyle };
-                
-                // Extraction badge for invoice documents
-                const isInvoiceDoc = classificationInfo && (classificationInfo.l2_id === "invoices" || classificationInfo.l2_name?.toLowerCase() === "invoices");
-                const docIsExtracted = extractedDocsSet.has(d.hash);
-                const showExtractionBadge = isInvoiceDoc && isCompleted;
-                const extractionBadgeLabel = docIsExtracted ? "EXTRACTED" : "EXTRACTION PENDING";
-                const extractionBadgeStyle = docIsExtracted
-                  ? { background: "rgba(251, 191, 36, 0.18)", borderColor: "rgba(251, 191, 36, 0.5)", color: "rgba(254, 243, 199, 0.95)" }
-                  : styles.docStagePending;
-                const canExtractDoc = showExtractionBadge && !docIsExtracted;
-                const extractDisabled = extractingHash === d.hash;
-                const extractionBadgeTitle = docIsExtracted
-                  ? "Metadata has been extracted from this invoice"
-                  : "Click to extract metadata from this invoice";
                 
                 return (
                   <li key={d.hash || d.stored_name || d.name} style={styles.listItem}>
@@ -1579,66 +1271,7 @@ export default function IngestPage({ systemStatus = {} }) {
                       >
                         {embedBadgeLabel}
                       </span>
-                      {canReclassify ? (
-                        <button
-                          type="button"
-                          style={{
-                            ...classificationBadgeCommonStyle,
-                            cursor: reclassifyDisabled ? "default" : "pointer",
-                            opacity: reclassifyDisabled ? 0.6 : 1,
-                          }}
-                          onClick={() => handleReclassify(d.hash)}
-                          disabled={reclassifyDisabled}
-                          title={classificationBadgeTitle}
-                          aria-label="Re-run document classification"
-                        >
-                          {classificationLabel}
-                        </button>
-                      ) : (
-                        <span
-                          style={classificationBadgeCommonStyle}
-                          title={classificationBadgeTitle}
-                        >
-                          {classificationLabel}
-                        </span>
-                      )}
-                      {showExtractionBadge && (
-                        canExtractDoc ? (
-                          <button
-                            type="button"
-                            style={{
-                              ...styles.docStageBadge,
-                              ...extractionBadgeStyle,
-                              cursor: extractDisabled ? "default" : "pointer",
-                              opacity: extractDisabled ? 0.6 : 1,
-                            }}
-                            onClick={() => handleExtractDoc(d.hash)}
-                            disabled={extractDisabled}
-                            title={extractionBadgeTitle}
-                            aria-label="Extract metadata from invoice"
-                          >
-                            {extractDisabled ? "EXTRACTING…" : extractionBadgeLabel}
-                          </button>
-                        ) : (
-                          <span
-                            style={{ ...styles.docStageBadge, ...extractionBadgeStyle }}
-                            title={extractionBadgeTitle}
-                          >
-                            {extractionBadgeLabel}
-                          </span>
-                        )
-                      )}
                     </div>
-                    {classificationReady && (
-                      <div style={{ ...styles.docMetaRow, marginTop: 4 }}>
-                        <span style={styles.docMetaItem}>
-                          <span style={{ opacity: 0.65 }}>Classification:</span>{" "}
-                          {classificationInfo.l1_name || classificationInfo.l1_id}
-                          {classificationInfo.l2_name ? ` → ${classificationInfo.l2_name}` : ""}
-                          {classificationInfo.l2_id && !classificationInfo.l2_name ? ` → ${classificationInfo.l2_id}` : ""}
-                        </span>
-                      </div>
-                    )}
 
                     {(d.last_ingested_at || showPerf) && (
                       <>
@@ -1707,9 +1340,6 @@ export default function IngestPage({ systemStatus = {} }) {
                       </div>
                     )}
                     {d.error && (<div style={styles.error}>Error: {d.error}</div>)}
-                    {classificationError && classificationStatus === "error" && (
-                      <div style={styles.error}>Classification error: {classificationError}</div>
-                    )}
 
                     {showRetry && (
                       <div style={styles.docActions}>

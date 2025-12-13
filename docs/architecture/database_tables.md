@@ -1,6 +1,6 @@
 # Database Tables
 
-The `DocumentStore` component (`backend/persistence.py`) provisions an on-disk SQLite schema that keeps track of document ingestion, chunking, embeddings, classifications, and chat conversations. The extraction subsystem can also create additional schema-driven metadata tables (e.g., `meta_invoices`) in the same SQLite DB.
+The `DocumentStore` component (`backend/persistence.py`) provisions an on-disk SQLite schema that keeps track of document ingestion, chunking, embeddings, and chat conversations.
 
 By default, the DB lives at `DOC_STORE_PATH` (see `.env`; commonly `app_data/rag_meta.db` via `${APP_DATA_ROOT}/rag_meta.db`).
 
@@ -16,9 +16,6 @@ erDiagram
         INTEGER token_count
         TEXT status
         TEXT error
-        TEXT classification_status
-        TEXT classification_error
-        TEXT last_classified_at
         TEXT created_at
         TEXT updated_at
         TEXT last_ingested_at
@@ -38,20 +35,6 @@ erDiagram
         TEXT text
         TEXT meta
         TEXT created_at
-    }
-    document_classifications {
-        TEXT doc_hash PK,FK
-        TEXT l1_id
-        TEXT l1_name
-        TEXT l2_id
-        TEXT l2_name
-        TEXT l1_confidence
-        TEXT l2_confidence
-        TEXT l1_reason
-        TEXT l2_reason
-        TEXT model
-        TEXT raw_response
-        TEXT updated_at
     }
     chunks {
         TEXT chunk_id PK
@@ -85,23 +68,6 @@ erDiagram
         REAL total_time_sec
         TEXT created_at
     }
-    meta_invoices {
-        TEXT doc_hash PK,FK
-        TEXT invoice_number
-        TEXT invoice_date
-        TEXT due_date
-        TEXT vendor_name
-        TEXT vendor_address
-        TEXT customer_name
-        REAL subtotal
-        REAL tax_amount
-        REAL total_amount
-        TEXT currency
-        TEXT payment_terms
-        TEXT po_number
-        TEXT extracted_at
-        TEXT extraction_model
-    }
     conversations {
         TEXT conversation_id PK
         TEXT summary
@@ -120,12 +86,10 @@ erDiagram
 
     documents ||--o{ jobs : "doc_hash"
     documents ||--o{ extractions : "doc_hash"
-    documents ||--|| document_classifications : "doc_hash"
     documents ||--o{ chunks : "doc_hash"
     chunking_configs ||--o{ chunks : "chunk_config_id"
     documents ||--|| performance_metrics : "doc_hash"
     chunks ||--|| embeddings : "chunk_id"
-    documents ||--o{ meta_invoices : "doc_hash"
     conversations ||--o{ conversation_messages : "conversation_id"
 ```
 
@@ -144,9 +108,6 @@ Canonical record for each uploaded file, keyed by a content hash so deduplicatio
 | `token_count` | INTEGER | Total tokenized length captured during ingestion. |
 | `status` | TEXT | Current ingestion status (`pending`, `processed`, `error`, etc.). |
 | `error` | TEXT | Error string captured when ingestion fails. |
-| `classification_status` | TEXT | Classification pipeline status (`pending`, `queued`, `running`, `classified`, `error`, etc.). |
-| `classification_error` | TEXT | Error string captured when classification fails. |
-| `last_classified_at` | TEXT | ISO timestamp when the document was last classified. |
 | `created_at` | TEXT | ISO timestamp when the row was first created. |
 | `updated_at` | TEXT | ISO timestamp for the latest mutation. |
 | `last_ingested_at` | TEXT | ISO timestamp when the document was last fully ingested. |
@@ -188,25 +149,6 @@ Stores parser-specific raw text and metadata produced during OCR/parsing.
 **Indexes**
 
 - `idx_ext_doc` supports quick lookups by `doc_hash`.
-
-### document_classifications
-
-Latest classification result for each document. This is updated by the ingestion worker and drives category-based features (like schema-driven extraction).
-
-| Column | Type | Keys & constraints |
-| --- | --- | --- |
-| `doc_hash` | TEXT | Primary key and foreign key to [`documents`](#documents). |
-| `l1_id` | TEXT | Required; L1 category identifier. |
-| `l1_name` | TEXT | Optional display name for L1 category. |
-| `l2_id` | TEXT | Optional; L2 category identifier. |
-| `l2_name` | TEXT | Optional display name for L2 category. |
-| `l1_confidence` | TEXT | Optional confidence value as returned by the classifier. |
-| `l2_confidence` | TEXT | Optional confidence value as returned by the classifier. |
-| `l1_reason` | TEXT | Optional explanation text for L1 classification. |
-| `l2_reason` | TEXT | Optional explanation text for L2 classification. |
-| `model` | TEXT | Optional classifier model identifier. |
-| `raw_response` | TEXT | JSON blob (stringified) of the classifier output. |
-| `updated_at` | TEXT | ISO timestamp when the classification row was last updated. |
 
 ### chunking_configs
 
@@ -274,41 +216,6 @@ One row per document summarizing ingestion timings.
 **Indexes**
 
 - `idx_perf_doc` duplicates the primary key for quick `doc_hash` probing.
-
-### Extraction metadata tables (dynamic)
-
-The extraction subsystem can create additional tables in the same SQLite DB based on `backend/services/extraction/schemas.py`. Each table has:
-
-- `doc_hash TEXT PRIMARY KEY` + FK to `documents(doc_hash)` (`ON DELETE CASCADE`)
-- Schema-specific fields (TEXT/REAL/INTEGER)
-- `extracted_at TEXT NOT NULL`
-- `extraction_model TEXT`
-
-Currently, the only registered schema is `invoices`, which creates:
-
-#### meta_invoices
-
-| Column | Type | Keys & constraints |
-| --- | --- | --- |
-| `doc_hash` | TEXT | Primary key and foreign key to [`documents`](#documents). |
-| `invoice_number` | TEXT | Extracted invoice number. |
-| `invoice_date` | TEXT | Extracted invoice date (typically `YYYY-MM-DD`). |
-| `due_date` | TEXT | Extracted due date (typically `YYYY-MM-DD`). |
-| `vendor_name` | TEXT | Extracted vendor name. |
-| `vendor_address` | TEXT | Extracted vendor address. |
-| `customer_name` | TEXT | Extracted customer name. |
-| `subtotal` | REAL | Extracted subtotal amount. |
-| `tax_amount` | REAL | Extracted tax amount. |
-| `total_amount` | REAL | Extracted total amount. |
-| `currency` | TEXT | Extracted currency code. |
-| `payment_terms` | TEXT | Extracted payment terms. |
-| `po_number` | TEXT | Extracted PO number. |
-| `extracted_at` | TEXT | ISO timestamp when extraction was written. |
-| `extraction_model` | TEXT | LLM model identifier used for extraction. |
-
-**Indexes**
-
-- The service attempts to create `idx_<table>_<field>` indexes for TEXT/REAL/INTEGER fields (best-effort).
 
 ### conversations
 

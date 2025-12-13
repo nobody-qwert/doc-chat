@@ -63,19 +63,11 @@ async def list_documents() -> List[Dict[str, Any]]:
             small_embeddings = int(embedding_counts.get(settings.chunk_config_small_id, 0))
             total_embeddings = int(sum(embedding_counts.values()))
 
-        classification = None
-        if doc_hash:
-            classification = await document_store.get_classification(doc_hash)
-
         doc_data["ocr_available"] = ocr_available
         doc_data["ocr_extracted_at"] = ocr_created_at
         doc_data["small_embeddings"] = small_embeddings
         doc_data["total_embeddings"] = total_embeddings
         doc_data["embedding_available"] = total_embeddings > 0
-        doc_data["classification"] = classification
-        doc_data["classification_status"] = doc.get("classification_status") or doc_data.get("classification_status") or "pending"
-        doc_data["classification_error"] = doc.get("classification_error")
-        doc_data["last_classified_at"] = doc.get("last_classified_at")
 
         if doc_hash and status in settings.completed_doc_statuses:
             metrics = await document_store.get_performance_metrics(doc_hash)
