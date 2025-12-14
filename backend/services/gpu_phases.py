@@ -71,6 +71,9 @@ class GPUPhaseManager:
                     await self._call_control(self._llm_url, "unload")
                     await self._call_control(self._ocr_url, "load")
                 else:
+                    # Best-effort: unload OCR if the active OCR provider supports it (e.g. Qwen3-VL).
+                    # MinerU does not expose /control/unload, so ignore missing endpoints.
+                    await self._call_control(self._ocr_url, "unload", ignore_missing=True)
                     await self._call_control(self._llm_url, "load")
                     await self._wait_for_llm_ready()
                 self._state = target
@@ -112,9 +115,18 @@ class GPUPhaseManager:
                     with contextlib.suppress(Exception):
                         return resp.json()
                 return None
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code if exc.response is not None else None
+                if ignore_missing and status_code in {404, 405}:
+                    return None
+                raise
+            except httpx.RequestError:
+                if ignore_missing:
+                    return None
+                raise
             except Exception:
                 if ignore_missing:
-                    raise
+                    return None
                 raise
 
     @staticmethod

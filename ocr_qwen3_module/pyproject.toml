@@ -1,0 +1,17 @@
+[project]
+name = "rag-qwen3-vl-ocr"
+version = "0.1.0"
+description = "Dedicated Qwen3-VL OCR service exposing the same API as the MinerU OCR module."
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "python-multipart>=0.0.9",
+  "httpx>=0.27",
+  "pydantic>=2.0",
+  "pymupdf>=1.24",
+  "pillow>=10.0",
+]
+
+[tool.uv]
+dev-dependencies = []

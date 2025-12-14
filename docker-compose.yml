@@ -34,11 +34,15 @@ services:
 
   ocr-module:
     build:
-      context: ./ocr_module
+      context: ./ocr_qwen3_module
       dockerfile: Dockerfile
       args:
         PREFETCH_MODELS: ${PREFETCH_MODELS}
-    env_file: .env
+        LLAMA_CPP_PYTHON_REF: ${LLAMA_CPP_PYTHON_REF:-main}
+        LLAMA_CPP_PYTHON_CACHE_BUST: ${LLAMA_CPP_PYTHON_CACHE_BUST:-1}
+    env_file:
+      - .env
+      - ./ocr_qwen3_module/qwen3.env
     stop_grace_period: 1s
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT}
@@ -47,15 +51,6 @@ services:
       OCR_OUTPUT_DIR: ${OCR_OUTPUT_DIR}
       OCR_INCOMING_DIR: ${OCR_INCOMING_DIR}
       OCR_WARMUP_DIR: ${OCR_WARMUP_DIR}
-      MINERU_DEVICE_MODE: ${MINERU_DEVICE_MODE}
-      MINERU_PARSE_METHOD: ${MINERU_PARSE_METHOD}
-      MINERU_LANG: ${MINERU_LANG}
-      MINERU_TABLE_ENABLE: ${MINERU_TABLE_ENABLE}
-      MINERU_FORMULA_ENABLE: ${MINERU_FORMULA_ENABLE}
-      MINERU_WARMUP_ON_STARTUP: ${MINERU_WARMUP_ON_STARTUP}
-      HF_HOME: ${HF_HOME}
-      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE}
-      ULTRALYTICS_HOME: ${ULTRALYTICS_HOME}
     deploy:
       resources:
         reservations:
@@ -65,11 +60,17 @@ services:
               capabilities: [gpu]
     volumes:
       - ${HOST_APP_DATA}:${APP_DATA_ROOT}
+      - ./models/vl:/models/vl:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   llm_big:
     build:
       context: .
       dockerfile: docker/llama-cpp.Dockerfile
+      args:
+        LLAMA_CPP_PYTHON_REF: ${LLAMA_CPP_PYTHON_REF:-main}
+        LLAMA_CPP_PYTHON_CACHE_BUST: ${LLAMA_CPP_PYTHON_CACHE_BUST:-1}
     image: local/llama-cpp:latest
 
     stop_grace_period: 1s

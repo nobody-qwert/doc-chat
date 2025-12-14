@@ -1,6 +1,7 @@
 FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
 
 ARG LLAMA_CPP_PYTHON_REF=main
+ARG LLAMA_CPP_PYTHON_CACHE_BUST=1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -14,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so \
   && ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
+  && echo "LLAMA_CPP_PYTHON_CACHE_BUST=${LLAMA_CPP_PYTHON_CACHE_BUST}" >/dev/null \
   && python3 -m pip install --upgrade pip \
   && python3 -m pip install --no-cache-dir \
       "llama-cpp-python[cuda] @ git+https://github.com/abetlen/llama-cpp-python.git@${LLAMA_CPP_PYTHON_REF}" \

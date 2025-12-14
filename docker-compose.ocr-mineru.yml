@@ -1,0 +1,14 @@
+services:
+  rag-backend:
+    environment:
+      OCR_PARSER_KEY: mineru
+
+  ocr-module:
+    build:
+      context: ./ocr_module
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+      - ./ocr_module/mineru.env
+    volumes:
+      - ${HOST_APP_DATA}:${APP_DATA_ROOT}
