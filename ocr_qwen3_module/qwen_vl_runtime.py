@@ -132,19 +132,7 @@ def load_qwen_vl_settings() -> QwenVLSettings:
     else:
         # Default command for llama-server (with --parallel 1 to prevent memory slot exhaustion)
         default_cmd = (
-            "llama-server "
-            "--model /models/vl/Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf "
-            "--mmproj /models/vl/mmproj-Qwen3-VL-30B-A3B-Instruct-F16.gguf "
-            "--alias qwen3_vl "
-            "--host 0.0.0.0 --port 8001 "
-            "--n-gpu-layers -1 "
-            "--flash-attn on "
-            "--mlock "
-            "--api-key local-ocr "
-            "-c 16384 "
-            "--ubatch-size 256 "
-            "--batch-size 512 "
-            "--parallel 1"
+            "fasz"
         )
         server_cmd = os.environ.get("QWEN_VL_SERVER_CMD")
         if not server_cmd:
