@@ -48,6 +48,34 @@ def _float_env(name: str) -> float:
         raise RuntimeError(f"Environment variable {name} must be a float (got {value!r})") from exc
 
 
+def _int_env(name: str) -> int:
+    value = _require_env(name)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Environment variable {name} must be an int (got {value!r})") from exc
+
+
+def _optional_float_env(name: str) -> Optional[float]:
+    value = _optional_env(name)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Environment variable {name} must be a float (got {value!r})") from exc
+
+
+def _optional_int_env(name: str) -> Optional[int]:
+    value = _optional_env(name)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise RuntimeError(f"Environment variable {name} must be an int (got {value!r})") from exc
+
+
 def _optional_env(name: str) -> Optional[str]:
     raw = os.environ.get(name)
     if raw is None:
@@ -65,6 +93,9 @@ class QwenVLSettings:
     server_cmd: Optional[str]
     model_alias: str
     temperature: float
+    top_k: int
+    top_p: float
+    repeat_penalty: float
     auto_load: bool
     shutdown_timeout: float
     request_timeout: float
@@ -126,6 +157,9 @@ def load_qwen_vl_settings() -> QwenVLSettings:
         raise RuntimeError("QWEN_VL_MODEL_ALIAS cannot be empty")
 
     temperature = _float_env("QWEN_VL_TEMPERATURE")
+    top_k = _optional_int_env("QWEN_VL_TOP_K")
+    top_p = _optional_float_env("QWEN_VL_TOP_P")
+    repeat_penalty = _optional_float_env("QWEN_VL_REPEAT_PENALTY")
     auto_load = _bool_env("QWEN_VL_AUTO_LOAD")
     shutdown_timeout = _float_env("QWEN_VL_SERVER_SHUTDOWN_TIMEOUT")
     request_timeout = _float_env("QWEN_VL_REQUEST_TIMEOUT")
@@ -142,6 +176,9 @@ def load_qwen_vl_settings() -> QwenVLSettings:
         server_cmd=server_cmd,
         model_alias=model_alias,
         temperature=float(temperature),
+        top_k=int(top_k) if top_k is not None else 20,
+        top_p=float(top_p) if top_p is not None else 0.95,
+        repeat_penalty=float(repeat_penalty) if repeat_penalty is not None else 1.1,
         auto_load=bool(auto_load),
         shutdown_timeout=max(1.0, float(shutdown_timeout)),
         request_timeout=max(5.0, float(request_timeout)),
@@ -424,6 +461,9 @@ async def qwen_vl_ocr_image(
                     }
                 ],
                 "temperature": float(settings.temperature),
+                "top_k": int(settings.top_k),
+                "top_p": float(settings.top_p),
+                "repeat_penalty": float(settings.repeat_penalty),
             }
             try:
                 resp = await client.post(settings.inference_url, json=payload)
