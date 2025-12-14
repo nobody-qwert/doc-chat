@@ -130,7 +130,7 @@ def load_qwen_vl_settings() -> QwenVLSettings:
     if stub or not managed_server:
         server_cmd = _optional_env("QWEN_VL_SERVER_CMD")
     else:
-        # Default command for llama-server
+        # Default command for llama-server (with --parallel 1 to prevent memory slot exhaustion)
         default_cmd = (
             "llama-server "
             "--model /models/vl/Qwen3-VL-30B-A3B-Instruct-Q4_K_M.gguf "
@@ -141,7 +141,10 @@ def load_qwen_vl_settings() -> QwenVLSettings:
             "--flash-attn on "
             "--mlock "
             "--api-key local-ocr "
-            "-c 12000"
+            "-c 16384 "
+            "--ubatch-size 256 "
+            "--batch-size 512 "
+            "--parallel 1"
         )
         server_cmd = os.environ.get("QWEN_VL_SERVER_CMD")
         if not server_cmd:
@@ -419,10 +422,10 @@ class QwenVLServer:
 def _image_variants(image_bytes: bytes) -> list[dict[str, Any]]:
     image_b64 = base64.b64encode(image_bytes).decode("ascii")
     data_url = f"data:image/png;base64,{image_b64}"
+    # Use only the standard OpenAI-compatible format
+    # llama-server expects: {"type": "image_url", "image_url": {"url": "..."}}
     return [
         {"type": "image_url", "image_url": {"url": data_url}},
-        {"type": "image_url", "image_url": data_url},
-        {"type": "input_image", "image_url": data_url},
     ]
 
 
@@ -448,7 +451,7 @@ async def qwen_vl_ocr_image(
     timeout = httpx.Timeout(settings.request_timeout, connect=min(10.0, settings.request_timeout))
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
         last_error: Optional[Exception] = None
-        for image_block in _image_variants(image_bytes):
+        for idx, image_block in enumerate(_image_variants(image_bytes), start=1):
             payload = {
                 "model": settings.model_alias,
                 "messages": [
@@ -466,9 +469,22 @@ async def qwen_vl_ocr_image(
                 "repeat_penalty": float(settings.repeat_penalty),
             }
             try:
+                logger.debug(
+                    "Qwen VL inference attempt %d/%d: image_size_kb=%.1f",
+                    idx,
+                    len(_image_variants(image_bytes)),
+                    image_size_kb,
+                )
                 resp = await client.post(settings.inference_url, json=payload)
                 if resp.status_code == 400:
-                    last_error = RuntimeError(resp.text)
+                    error_text = resp.text
+                    logger.warning("Qwen VL inference attempt %d failed with 400: %s", idx, error_text[:200])
+                    last_error = RuntimeError(error_text)
+                    continue
+                if resp.status_code == 503:
+                    error_text = resp.text
+                    logger.warning("Qwen VL inference attempt %d failed with 503 (server busy): %s", idx, error_text[:200])
+                    last_error = RuntimeError(f"Server busy (503): {error_text}")
                     continue
                 resp.raise_for_status()
                 data = resp.json()
