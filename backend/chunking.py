@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from hashlib import md5
 from typing import Any, Callable, Dict, List, Optional, Sequence
+from uuid import uuid4
 
 try:
     from .tokenizer_registry import load_tokenizer, record_tokenizer_fallback
@@ -111,8 +111,7 @@ def _chunks_for_spec(
         if not content_norm:
             continue
 
-        chunk_hash = md5(f"{spec.name}:{content_norm}".encode("utf-8")).hexdigest()
-        chunk_id = f"chunk-{spec.name}-{chunk_hash}"
+        chunk_id = uuid4().hex
         out.append(
             Chunk(
                 chunk_id=chunk_id,

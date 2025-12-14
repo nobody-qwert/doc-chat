@@ -124,10 +124,8 @@ async def process_document_text(
     def _scoped_chunk_id(raw_id: str) -> str:
         raw_id = raw_id.strip()
         if not raw_id:
-            return f"{doc_hash}-chunk-{uuid4().hex}"
-        if raw_id.startswith(doc_hash):
-            return raw_id
-        return f"{doc_hash}-{raw_id}"
+            return uuid4().hex
+        return raw_id
 
     start_chunking = time.perf_counter()
     chunks = run_chunking(ocr_text, specs, progress_cb=chunk_progress_cb)

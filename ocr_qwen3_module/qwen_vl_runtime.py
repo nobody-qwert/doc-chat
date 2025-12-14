@@ -406,6 +406,8 @@ async def qwen_vl_ocr_image(
     if settings.api_key:
         headers["Authorization"] = f"Bearer {settings.api_key}"
 
+    image_size_kb = len(image_bytes) / 1024.0
+
     timeout = httpx.Timeout(settings.request_timeout, connect=min(10.0, settings.request_timeout))
     async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
         last_error: Optional[Exception] = None
@@ -430,6 +432,20 @@ async def qwen_vl_ocr_image(
                     continue
                 resp.raise_for_status()
                 data = resp.json()
+
+                # Log token usage from the response
+                usage = data.get("usage") or {}
+                prompt_tokens = usage.get("prompt_tokens", "N/A")
+                completion_tokens = usage.get("completion_tokens", "N/A")
+                total_tokens = usage.get("total_tokens", "N/A")
+                logger.info(
+                    "Qwen VL inference: prompt_tokens=%s, completion_tokens=%s, total_tokens=%s, image_size_kb=%.1f",
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    image_size_kb,
+                )
+
                 choices = data.get("choices") or []
                 if not choices:
                     raise RuntimeError("No choices in response")
