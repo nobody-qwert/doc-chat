@@ -281,7 +281,7 @@ const baseMarkdownComponents = {
     ),
 };
 
-const FALLBACK_PARSER = "mineru";
+const FALLBACK_PARSER = "qwen3_vl";
 const IN_PROGRESS_STATUSES = new Set([
   "processing",
   "ingesting",
