@@ -1,5 +1,5 @@
 services:
-  rag-backend:
+  backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -101,7 +101,7 @@ services:
         aliases:
           - ocr-module
 
-  llm_big:
+  llm-inference:
     build:
       context: ./llama-cpp
       dockerfile: Dockerfile
@@ -195,7 +195,7 @@ services:
       args:
         VITE_LLM_CONTEXT_SIZE: ${LLM_CONTEXT_SIZE}
     depends_on:
-      - rag-backend
+      - backend
     stop_grace_period: 1s
     ports:
       - "${FRONTEND_PORT}:80"
