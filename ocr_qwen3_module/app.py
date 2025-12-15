@@ -100,6 +100,23 @@ def _strip_code_fences(text: str) -> str:
     return inner.strip()
 
 
+def _strip_image_syntax(text: str) -> str:
+    """Remove markdown image syntax like ![alt](url).
+    
+    Qwen VL sometimes hallucinates image URLs (e.g., imgur.com links) when it sees
+    icons or diagrams in the PDF. These don't exist and cause broken image placeholders
+    in the frontend. We strip them entirely.
+    """
+    if not text:
+        return text
+    # Match markdown image syntax: ![optional alt text](url)
+    # This handles: ![](url), ![alt](url), ![alt text with spaces](url)
+    cleaned = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text)
+    # Also remove any leftover empty lines from removed images
+    cleaned = re.sub(r'\n\s*\n\s*\n', '\n\n', cleaned)
+    return cleaned.strip()
+
+
 DATA_DIR = Path(_require_env("DATA_DIR"))
 INDEX_DIR = Path(_require_env("INDEX_DIR"))
 OCR_OUTPUT_DIR = Path(_require_env("OCR_OUTPUT_DIR"))
@@ -349,7 +366,8 @@ async def _process_job(job: OCRJob, *, options: Dict[str, Any]) -> None:
 
             text = await qwen_vl_ocr_image(settings=vl_settings, image_bytes=page.png_bytes, prompt=prompt)
             # Strip code fences that Qwen VL sometimes wraps around markdown output
-            cleaned = _strip_code_fences((text or "").strip())
+            # Strip fake image URLs that Qwen VL hallucinates (e.g., imgur.com links)
+            cleaned = _strip_image_syntax(_strip_code_fences((text or "").strip()))
             page_texts.append(cleaned)
             per_page.append({
                 "page": idx,
