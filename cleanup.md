@@ -18,13 +18,13 @@
    - `backend/app.py` should read `BACKEND_PORT` via the stricter helpers or `settings` and fail if unset.
    - `backend/embeddings.py` currently pulls `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_BATCH_SIZE` directly with defaults—switch these to the same helper logic (or wire them through `AppSettings`).
    - `backend/tokenizer_registry.py` should require `TRANSFORMERS_SPEC` instead of silently defaulting to `transformers>=4.40`.
-4. **OCR service (`ocr_module/`)**
-   - Replace the direct `os.environ.get` blocks in `ocr_module/app.py` and `ocr_module/mineru_wrapper.py` with helper functions that raise when storage paths, MinerU settings, or warmup flags are missing.
+4. **OCR service (`ocr_mineru/`)**
+   - Replace the direct `os.environ.get` blocks in `ocr_mineru/app.py` and `ocr_mineru/mineru_wrapper.py` with helper functions that raise when storage paths, MinerU settings, or warmup flags are missing.
    - Make `_env_bool` raise on malformed/missing values instead of returning `default`.
    - Ensure the FastAPI app refuses to boot if `PORT` is absent.
 5. **Diagnostics service (`diagnostics/app.py`)**
    - Require `PORT` at startup so the container cannot silently fall back to 9001.
-6. **LLM controller (`docker/llm_controller.py`)**
+6. **LLM controller (`llama-cpp/llm_controller.py`)**
    - Introduce a simple `require_env("NAME")` helper that throws when `LLM_SERVER_CMD`, `LLM_CONTROL_PORT`, `LLM_SERVER_SHUTDOWN_TIMEOUT`, or `LOG_LEVEL` are missing.
    - Document that these must be set by `docker-compose` (and add them to `.env` for discoverability).
 7. **Verification**
@@ -43,14 +43,14 @@ Variables currently read by the code but absent from `.env`. Some are provided i
 | `DIAGNOSTICS_URL` | `backend/config.py:115`, `backend/utils/gpu.py:21` | Needed so GPU diagnostics work.
 | `EMBEDDING_BATCH_SIZE` | `backend/embeddings.py:14`, `backend/routes/system.py:63` | Currently falls back to 1.
 | `GPU_PHASE_TIMEOUT` | `backend/config.py:160` | Governs GPU warmup state machine.
-| `LLM_CONTROL_PORT` | `docker/llm_controller.py:31` | Passed into the controller container only via compose.
+| `LLM_CONTROL_PORT` | `llama-cpp/llm_controller.py:67` | Passed into the controller container only via compose.
 | `LLM_CONTROL_URL` | `backend/config.py:109` | Used to drive the llama.cpp control plane.
 | `LLM_READY_TIMEOUT` | `backend/config.py:161` | Wait duration before backend declares LLM unavailable.
-| `LLM_SERVER_CMD` | `docker/llm_controller.py:27` | Full llama.cpp launch command.
-| `LLM_SERVER_SHUTDOWN_TIMEOUT` | `docker/llm_controller.py:33` | Graceful shutdown timer for controller.
-| `LOG_LEVEL` | `docker/llm_controller.py:36` | Controls logging verbosity for controller.
+| `LLM_SERVER_CMD` | `llama-cpp/llm_controller.py:65` | Full llama.cpp launch command.
+| `LLM_SERVER_SHUTDOWN_TIMEOUT` | `llama-cpp/llm_controller.py:69` | Graceful shutdown timer for controller.
+| `LOG_LEVEL` | `llama-cpp/llm_controller.py:72` | Controls logging verbosity for controller.
 | `OCR_CONTROL_URL` | `backend/config.py:113` | Backend uses it to call the OCR control plane.
-| `PORT` | `diagnostics/app.py:134`, `ocr_module/app.py:397` | Required by the diagnostics and OCR services when run outside docker.
+| `PORT` | `diagnostics/app.py:134`, `ocr_mineru/app.py:397` | Required by the diagnostics and OCR services when run outside docker.
 | `TRANSFORMERS_SPEC` | `backend/tokenizer_registry.py:33` | Determines which transformers build to auto-install.
 
 Update `.env` (and `.env.example`) with the above values before removing the defaults so developers know what to supply.

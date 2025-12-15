@@ -36,7 +36,7 @@ services:
   ocr-qwen3:
     profiles: [qwen3]
     build:
-      context: ./ocr_qwen3_module
+      context: ./ocr_qwen3vl
       dockerfile: Dockerfile
       args:
         PREFETCH_MODELS: ${PREFETCH_MODELS}
@@ -44,7 +44,7 @@ services:
         LLAMA_CPP_PYTHON_CACHE_BUST: ${LLAMA_CPP_PYTHON_CACHE_BUST:-1}
     env_file:
       - .env
-      - ./ocr_qwen3_module/qwen3.env
+      - ./ocr_qwen3vl/qwen3.env
     stop_grace_period: 1s
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT}
@@ -74,11 +74,11 @@ services:
   ocr-mineru:
     profiles: [mineru]
     build:
-      context: ./ocr_module
+      context: ./ocr_mineru
       dockerfile: Dockerfile
     env_file:
       - .env
-      - ./ocr_module/mineru.env
+      - ./ocr_mineru/mineru.env
     stop_grace_period: 1s
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT}
@@ -103,8 +103,8 @@ services:
 
   llm_big:
     build:
-      context: .
-      dockerfile: docker/llama-cpp.Dockerfile
+      context: ./llama-cpp
+      dockerfile: Dockerfile
       args:
         LLAMA_CPP_PYTHON_REF: ${LLAMA_CPP_PYTHON_REF:-main}
         LLAMA_CPP_PYTHON_CACHE_BUST: ${LLAMA_CPP_PYTHON_CACHE_BUST:-1}

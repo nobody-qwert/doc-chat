@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Runs the llama.cpp server subprocess and exposes a control API.
+
 import asyncio
 import logging
 import os

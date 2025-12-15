@@ -478,7 +478,7 @@ if __name__ == "__main__":
 
     port_raw = os.environ.get("PORT")
     if port_raw is None or not port_raw.strip():
-        raise RuntimeError("PORT environment variable must be set for ocr_qwen3_module")
+        raise RuntimeError("PORT environment variable must be set for ocr_qwen3vl")
     try:
         port = int(port_raw)
     except ValueError as exc:

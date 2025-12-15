@@ -73,8 +73,8 @@ Split configuration into:
 
 Implementation detail (Compose):
 - Use an OCR-provider-specific env file, e.g.:
-  - `ocr_module/mineru.env` (or `ocr_module/mineru.env.example`)
-  - `ocr_qwen3_module/qwen3.env` (or example)
+  - `ocr_mineru/mineru.env` (or `ocr_mineru/mineru.env.example`)
+  - `ocr_qwen3vl/qwen3.env` (or example)
 - In `docker-compose.yml` (or override), attach provider env files only to that provider service.
 
 ## Qwen3-VL OCR Module (New Docker Service)
@@ -152,7 +152,7 @@ That override:
 - overrides `OCR_PARSER_KEY=qwen3_vl`
 - sets `OCR_MODULE_URL` / `OCR_CONTROL_URL` appropriately if service name changes
 - mounts models / enables GPU
-- loads `ocr_qwen3_module/qwen3.env`
+- loads `ocr_qwen3vl/qwen3.env`
 
 This keeps switching as:
 - MinerU: `docker compose up`
@@ -161,7 +161,7 @@ This keeps switching as:
 ## Phased Implementation Plan
 
 ### Phase 1 — Env compartmentalization (no behavior change)
-- Move MinerU-only vars out of root `.env` into `ocr_module/mineru.env` (and add an example template).
+- Move MinerU-only vars out of root `.env` into `ocr_mineru/mineru.env` (and add an example template).
 - Update Compose to load MinerU env file for the MinerU service only.
 - Keep backend OCR vars in root `.env` unchanged.
 
@@ -170,7 +170,7 @@ Acceptance:
 - Root `.env` no longer needs `MINERU_*`.
 
 ### Phase 2 — Qwen3 OCR container scaffold (API compatibility)
-- Create new service directory (e.g. `ocr_qwen3_module/`) with:
+- Create new service directory (e.g. `ocr_qwen3vl/`) with:
   - FastAPI app mirroring endpoints and response shapes
   - job queue/status/result plumbing
   - placeholder implementation that returns deterministic output
@@ -210,4 +210,3 @@ Acceptance:
    - Whether to run llama-cpp as an internal library call vs a separate server process inside the OCR container.
 4. Model placement:
    - Volume-mount `.gguf` model files vs baking into the image.
-

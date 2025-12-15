@@ -21,7 +21,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build libgomp1 \
   && rm -rf /var/lib/apt/lists/*
 
-# Work around CUDA stub libs during build (same pattern as docker/llama-cpp.Dockerfile).
 RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so \
   && ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcuda.so.1 \
   && echo "Building llama.cpp from source..." \
