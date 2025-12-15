@@ -19,11 +19,9 @@ def _require_env(name: str) -> str:
 class EmbeddingClient:
     def __init__(self) -> None:
         base = _require_env("EMBEDDING_BASE_URL")
-        key = _require_env("EMBEDDING_API_KEY")
         model = _require_env("EMBEDDING_MODEL")
         batch_size = _require_env("EMBEDDING_BATCH_SIZE")
         self.base = base
-        self.key = key
         self.model = model
         self.dim: Optional[int] = None
         try:
@@ -36,7 +34,7 @@ class EmbeddingClient:
 
         from openai import AsyncOpenAI  # type: ignore
 
-        self._client = AsyncOpenAI(base_url=self.base, api_key=self.key)
+        self._client = AsyncOpenAI(base_url=self.base, api_key="local")
 
     async def embed_batch(self, texts: List[str]) -> List[np.ndarray]:
         if not texts:
@@ -45,10 +43,10 @@ class EmbeddingClient:
         out: List[np.ndarray] = []
         for start in range(0, len(texts), self.max_batch):
             batch = texts[start : start + self.max_batch]
-            vectors = await self._client.embeddings.create(model=self.model, input=batch)  # type: ignore[attr-defined]
-            data = vectors.data  # type: ignore
+            vectors = await self._client.embeddings.create(model=self.model, input=batch)
+            data = vectors.data
             for item in data:
-                v = np.asarray(item.embedding, dtype=np.float32)  # type: ignore[attr-defined]
+                v = np.asarray(item.embedding, dtype=np.float32)
                 current_dim = int(v.shape[0])
                 if self.dim is None:
                     self.dim = current_dim

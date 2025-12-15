@@ -12,10 +12,8 @@ services:
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT}
       LLM_BASE_URL: ${LLM_BASE_URL}
-      LLM_API_KEY: ${LLM_API_KEY}
       LLM_CONTEXT_SIZE: ${LLM_CONTEXT_SIZE}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL}
-      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
       DATA_DIR: ${DATA_DIR}
       INDEX_DIR: ${INDEX_DIR}
@@ -32,7 +30,6 @@ services:
     ports:
       - "${BACKEND_PORT}:8000"
 
-  # OCR with Qwen3-VL (default) - use: docker compose --profile qwen3 up
   ocr-qwen3:
     profiles: [qwen3]
     build:
@@ -70,7 +67,6 @@ services:
         aliases:
           - ocr-module
 
-  # OCR with MinerU - use: docker compose --profile mineru up
   ocr-mineru:
     profiles: [mineru]
     build:
@@ -127,7 +123,6 @@ services:
         --n_gpu_layers -1
         --flash_attn true
         --use_mlock true
-        --api_key ${LLM_API_KEY}
       LLM_SERVER_SHUTDOWN_TIMEOUT: ${LLM_SERVER_SHUTDOWN_TIMEOUT}
       LOG_LEVEL: ${LOG_LEVEL}
     deploy:
@@ -155,7 +150,6 @@ services:
       --n_ctx ${EMBED_CONTEXT_SIZE}
       --n_gpu_layers -1
       --use_mlock true
-      --api_key ${EMBEDDING_API_KEY}
     environment:
       LLAMA_CUBLAS: "1"
     deploy:

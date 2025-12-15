@@ -16,7 +16,7 @@
    - Update `frontend_origin` and other derived fields so they read from required env vars instead of embedding defaults.
 3. **Backend modules that bypass `AppSettings`**
    - `backend/app.py` should read `BACKEND_PORT` via the stricter helpers or `settings` and fail if unset.
-   - `backend/embeddings.py` currently pulls `EMBEDDING_BASE_URL`, `EMBEDDING_API_KEY`, `EMBEDDING_MODEL`, `EMBEDDING_BATCH_SIZE` directly with defaults—switch these to the same helper logic (or wire them through `AppSettings`).
+   - `backend/embeddings.py` currently pulls `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL`, `EMBEDDING_BATCH_SIZE` directly with defaults—switch these to the same helper logic (or wire them through `AppSettings`).
    - `backend/tokenizer_registry.py` should require `TRANSFORMERS_SPEC` instead of silently defaulting to `transformers>=4.40`.
 4. **OCR service (`ocr_mineru/`)**
    - Replace the direct `os.environ.get` blocks in `ocr_mineru/app.py` and `ocr_mineru/mineru_wrapper.py` with helper functions that raise when storage paths, MinerU settings, or warmup flags are missing.

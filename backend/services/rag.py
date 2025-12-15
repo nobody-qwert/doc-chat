@@ -195,10 +195,10 @@ async def _prepare_question_payload(
     docs = await document_store.list_documents()
     docs_by_hash = {doc["doc_hash"]: doc for doc in docs}
 
-    if not settings.llm_base_url or not settings.llm_api_key:
+    if not settings.llm_base_url:
         raise HTTPException(
             status_code=500,
-            detail="LLM_BASE_URL and LLM_API_KEY must be set",
+            detail="LLM_BASE_URL must be set",
         )
 
     prompt_token_limit = min(
@@ -334,7 +334,7 @@ async def ask_question(req: AskRequest) -> AskResponse:
         try:
             from openai import AsyncOpenAI  # type: ignore
 
-            client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+            client = AsyncOpenAI(base_url=settings.llm_base_url, api_key="local")
             completion_args = _build_completion_args(
                 model=settings.llm_model,
                 messages=messages,
@@ -401,13 +401,13 @@ async def ask_question(req: AskRequest) -> AskResponse:
 
 
 async def warmup_llm() -> Dict[str, Any]:
-    if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
+    if not settings.llm_base_url or not settings.llm_model:
         return {"warmup_complete": False, "error": "LLM env missing"}
     try:
         await gpu_phase_manager.ensure_llm_ready()
         from openai import AsyncOpenAI  # type: ignore
 
-        client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+        client = AsyncOpenAI(base_url=settings.llm_base_url, api_key="local")
         await client.chat.completions.create(
             model=settings.llm_model,
             messages=[
@@ -436,11 +436,7 @@ async def _generate_hyde_answer(question: str, history_summary: str) -> Optional
     question_clean = (question or "").strip()
     if not question_clean:
         return None
-    if not settings.llm_base_url or not settings.llm_api_key or not settings.llm_model:
-        return None
-    try:
-        from openai import AsyncOpenAI  # type: ignore
-    except ImportError:  # pragma: no cover - optional dependency
+    if not settings.llm_base_url or not settings.llm_model:
         return None
 
     prompt_header = (
@@ -455,7 +451,12 @@ async def _generate_hyde_answer(question: str, history_summary: str) -> Optional
     )
     max_tokens = max(64, min(256, settings.chat_completion_max_tokens))
 
-    client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+    try:
+        from openai import AsyncOpenAI  # type: ignore
+    except ImportError:  # pragma: no cover - optional dependency
+        return None
+
+    client = AsyncOpenAI(base_url=settings.llm_base_url, api_key="local")
     try:
         completion_args = _build_completion_args(
             model=settings.llm_model,
@@ -626,8 +627,8 @@ async def stream_question(req: AskRequest):
             filtered_sections = [entry for entry in scored if entry["score"] >= settings.min_context_similarity]
             context_sections = filtered_sections[:top_k]
 
-            if not settings.llm_base_url or not settings.llm_api_key:
-                raise HTTPException(status_code=500, detail="LLM_BASE_URL and LLM_API_KEY must be set")
+            if not settings.llm_base_url:
+                raise HTTPException(status_code=500, detail="LLM_BASE_URL must be set")
 
             prompt_token_limit = min(
                 max(512, settings.chat_context_window - settings.chat_completion_reserve),
@@ -729,7 +730,7 @@ async def stream_question(req: AskRequest):
                 await gpu_phase_manager.ensure_llm_ready()
                 from openai import AsyncOpenAI  # type: ignore
 
-                client = AsyncOpenAI(base_url=settings.llm_base_url, api_key=settings.llm_api_key)
+                client = AsyncOpenAI(base_url=settings.llm_base_url, api_key="local")
                 yield _json_line({"type": "step", "step": {"name": "Main LLM", "kind": "llm", "order": order, "state": "started"}})
                 completion_args = _build_completion_args(
                     model=settings.llm_model,

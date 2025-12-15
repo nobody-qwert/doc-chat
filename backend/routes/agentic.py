@@ -44,8 +44,6 @@ async def ask_agentic_stream(req: AgenticRequest):
     - {"type": "token", "content": "..."} - Answer tokens
     - {"type": "final", ...} - Final result with metadata
     """
-    from openai import AsyncOpenAI
-    
     query = (req.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="Query must not be empty")
@@ -62,13 +60,12 @@ async def ask_agentic_stream(req: AgenticRequest):
     await gpu_phase_manager.ensure_llm_ready()
     
     # Create clients
-    if not settings.llm_base_url or not settings.llm_api_key:
+    if not settings.llm_base_url:
         raise HTTPException(status_code=500, detail="LLM not configured")
-    
-    llm_client = AsyncOpenAI(
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
-    )
+
+    from openai import AsyncOpenAI
+
+    llm_client = AsyncOpenAI(base_url=settings.llm_base_url, api_key="local")
     
     embedding_client = EmbeddingClient()
     

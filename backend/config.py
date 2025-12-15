@@ -41,7 +41,6 @@ class AppSettings:
     chunk_config_small_id: str
     chunking_configs: Tuple[ChunkingConfigSpec, ...]
     llm_base_url: str
-    llm_api_key: str
     llm_model: str
     llm_tokenizer_id: str
     llm_temperature: float
@@ -176,7 +175,6 @@ def load_settings() -> AppSettings:
         chunk_config_small_id="chunk-small",
         chunking_configs=chunking_configs,
         llm_base_url=_str_env("LLM_BASE_URL"),
-        llm_api_key=_str_env("LLM_API_KEY"),
         llm_model=_str_env("LLM_MODEL"),
         llm_tokenizer_id=llm_tokenizer_id,
         llm_temperature=_float_env("LLM_TEMPERATURE"),
