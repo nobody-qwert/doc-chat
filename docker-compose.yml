@@ -6,8 +6,8 @@ services:
     env_file: .env
     depends_on:
       - embed
-      - ocr-module
       - diagnostics
+    # Note: OCR service is started via profile (qwen3 or mineru) and accessed via 'ocr-module' network alias
     stop_grace_period: 1s
     environment:
       APP_DATA_ROOT: ${APP_DATA_ROOT}
@@ -32,7 +32,9 @@ services:
     ports:
       - "${BACKEND_PORT}:8000"
 
-  ocr-module:
+  # OCR with Qwen3-VL (default) - use: docker compose --profile qwen3 up
+  ocr-qwen3:
+    profiles: [qwen3]
     build:
       context: ./ocr_qwen3_module
       dockerfile: Dockerfile
@@ -63,6 +65,41 @@ services:
       - ./models/vl:/models/vl:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      default:
+        aliases:
+          - ocr-module
+
+  # OCR with MinerU - use: docker compose --profile mineru up
+  ocr-mineru:
+    profiles: [mineru]
+    build:
+      context: ./ocr_module
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+      - ./ocr_module/mineru.env
+    stop_grace_period: 1s
+    environment:
+      APP_DATA_ROOT: ${APP_DATA_ROOT}
+      DATA_DIR: ${DATA_DIR}
+      INDEX_DIR: ${INDEX_DIR}
+      OCR_OUTPUT_DIR: ${OCR_OUTPUT_DIR}
+      OCR_INCOMING_DIR: ${OCR_INCOMING_DIR}
+      OCR_WARMUP_DIR: ${OCR_WARMUP_DIR}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ${HOST_APP_DATA}:${APP_DATA_ROOT}
+    networks:
+      default:
+        aliases:
+          - ocr-module
 
   llm_big:
     build:
