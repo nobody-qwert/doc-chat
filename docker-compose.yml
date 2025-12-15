@@ -56,7 +56,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              count: 1
               capabilities: [gpu]
     volumes:
       - ${HOST_APP_DATA}:${APP_DATA_ROOT}
