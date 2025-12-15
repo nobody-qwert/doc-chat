@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -64,6 +65,39 @@ def _unescape_env(value: str) -> str:
 
 def _utc_now() -> str:
     return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+
+
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences that wrap the entire output.
+    
+    Qwen VL sometimes wraps its output in code fences like:
+    ```markdown
+    actual content here
+    ```
+    
+    This breaks ReactMarkdown rendering, so we strip them.
+    """
+    if not text:
+        return text
+    stripped = text.strip()
+    
+    # Pattern to match opening code fence with optional language hint
+    # Matches: ```markdown, ```md, ```, etc. at the start
+    opening_match = re.match(r'^```(?:markdown|md)?\s*\n', stripped)
+    if not opening_match:
+        return text
+    
+    # Check for closing fence at the end
+    closing_match = re.search(r'\n```\s*$', stripped)
+    if not closing_match:
+        return text
+    
+    # Remove the fences
+    content_start = opening_match.end()
+    content_end = closing_match.start()
+    inner = stripped[content_start:content_end]
+    
+    return inner.strip()
 
 
 DATA_DIR = Path(_require_env("DATA_DIR"))
@@ -314,7 +348,8 @@ async def _process_job(job: OCRJob, *, options: Dict[str, Any]) -> None:
             prompt = (vl_settings.prompt + prompt_hint).strip()
 
             text = await qwen_vl_ocr_image(settings=vl_settings, image_bytes=page.png_bytes, prompt=prompt)
-            cleaned = (text or "").strip()
+            # Strip code fences that Qwen VL sometimes wraps around markdown output
+            cleaned = _strip_code_fences((text or "").strip())
             page_texts.append(cleaned)
             per_page.append({
                 "page": idx,
