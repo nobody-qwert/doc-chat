@@ -295,10 +295,11 @@ async def _process_job(job: OCRJob, *, options: Dict[str, Any]) -> None:
         per_page: list[dict[str, Any]] = []
         for idx, page in enumerate(rendered_pages, start=1):
             png_name = f"page_{idx:04}.png"
-            (pages_dir / png_name).write_bytes(page.png_bytes)
             rel_path = str(Path("pages") / png_name)
-            image_files.append(rel_path)
-            image_blocks.append({"page": idx, "path": rel_path, "width": page.size[0], "height": page.size[1]})
+            if SAVE_IMAGES:
+                (pages_dir / png_name).write_bytes(page.png_bytes)
+                image_files.append(rel_path)
+            image_blocks.append({"page": idx, "path": rel_path if SAVE_IMAGES else None, "width": page.size[0], "height": page.size[1]})
 
             page_start = time.perf_counter()
             job.update_progress("ocr", 10.0 + (idx - 1) / total_pages * 85.0, current=idx, total=total_pages)
