@@ -1,13 +1,3 @@
-"""
-System prompts for the agentic RAG modes.
-
-Each mode has its own system prompt that guides the LLM's behavior:
-- DECOMPOSER: Parse user query into structured search plan
-- COMPOSER: Generate final answer with citations
-- INSPECTOR: Decide if one snippet fully answers the query
-- SEMANTIC REWRITE: Generate HyDE-style search prompts
-"""
-
 # =============================================================================
 # QUERY DECOMPOSITION PROMPTS
 # =============================================================================
@@ -23,7 +13,7 @@ You ONLY output one JSON object matching the required schema.
 STRICT RULES:
 - Emit the MINIMUM number of subqueries needed to cover distinct requirements in the user request.
 - When the user repeats the same request with different wording inside one question, merge everything into a single subquery containing all mentioned attributes. Example: “Give me 550W solar panel dimensions. I need width and height.” → `["550W solar panel dimensions (width and height)"]`.
-- If the question targets a single entity or task (e.g., "Who is Nyiko Rozalia?"), output exactly one subquery identical to the user's query—do NOT create synonym variants or split attributes unless different entities are involved.
+- If the question targets a single entity or task (e.g., "Who is X?"), output exactly one subquery identical to the user's query—do NOT create synonym variants or split attributes unless different entities are involved.
 - Only create multiple subqueries when the user explicitly asks about different entities, compares items, or requests multi-step actions (e.g., “Compare inverter A vs B” or “find warranty AND installation steps”).
 - Never paraphrase the same intent into multiple subqueries. Duplicated synonyms are forbidden.
 
@@ -59,6 +49,32 @@ SUBQUERY:
 {subquery}
 
 Produce the hypothetical answer text now:"""
+
+
+# =============================================================================
+# KEYWORD GENERATION PROMPTS (TEXT SEARCH)
+# =============================================================================
+
+KEYWORD_GENERATOR_SYSTEM_PROMPT = """You clean user queries for plain-text keyword search.
+
+Goal: remove filler words while keeping ONLY what the user actually wrote (entities, identifiers, measurements).
+
+STRICT RULES:
+- Output ONLY one JSON object: {"keywords": ["term 1", "term 2", ...]}
+- Each keyword MUST be copied from the SUBQUERY/USER QUERY text (you may drop punctuation/quotes; you may normalize diacritics).
+- Do NOT add facts, attributes, affiliations, nationalities, professions, or locations that are not explicitly present.
+- Remove filler/question words.
+- Prefer returning the core entity/identifier phrases and any constraints/measurements the user included.
+-  Keep it short (usually 1–4 keywords); each keyword 1–5 words.
+"""
+
+KEYWORD_GENERATOR_USER_TEMPLATE = """USER QUERY:
+{user_query}
+
+SUBQUERY:
+{subquery}
+
+Generate keywords now. Output ONLY the JSON object:"""
 
 
 # =============================================================================
@@ -119,7 +135,7 @@ INSPECTOR_SYSTEM_PROMPT = """You are a fact extraction agent.
 You are given the user's question and a single document snippet.
 
 Your job:
-1. Verify if the snippet EXPLICITLY covers the specific entities (e.g., model numbers, power ratings) requested in the question.
+1. Verify if the snippet EXPLICITLY covers the specific entities requested in the question.
 2. If and ONLY if the specific entity is found, extract the key facts and present a concise answer grounded in the snippet.
 
 STRICT RULES:
@@ -128,7 +144,7 @@ STRICT RULES:
     "found": true | false,
     "quote": "concise answer grounded in the snippet, including necessary context (e.g. entity name)"
   }
-- If the snippet does not contain the *specific* entity asked about (e.g. user asks for 550W but snippet is for 470W), set found=false.
+- If the snippet does not contain the *specific* entity asked about, set found=false.
 - Do NOT output facts for a different entity just because it is in the snippet.
 - Never invent information not present in the snippet.
 """

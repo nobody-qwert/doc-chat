@@ -22,6 +22,7 @@ from .modes import (
     inspect_evidence,
     verify_citations,
     rewrite_semantic_query,
+    generate_keywords,
 )
 from .tools import execute_tool, ToolResult
 
@@ -118,8 +119,44 @@ async def stream_agentic_answer(
         subquery_evidence: List[Dict[str, Any]] = []
         search_queries = [primary_query]
         for search_query in search_queries:
+            keyword_query = search_query
+            if (search_query or "").strip():
+                keyword_label = "Generate Keywords"
+                yield _emit_step(AgenticStep(step_num, keyword_label, "rewrite"), "started")
+                keyword_start = time.perf_counter()
+                keyword_result = await generate_keywords(
+                    original_query=search_query,
+                    user_query=query,
+                    llm_client=llm_client,
+                    model=model,
+                    max_keywords=int(getattr(settings, "agentic_keyword_max_terms", 10)),
+                )
+                keyword_duration = time.perf_counter() - keyword_start
+                keyword_query = keyword_result.keyword_query or search_query
+                keyword_step = AgenticStep(
+                    step_number=step_num,
+                    name=keyword_label,
+                    kind="rewrite",
+                    duration_seconds=keyword_duration,
+                    details=_llm_step_details(
+                        {
+                            "original_query": search_query,
+                            "keyword_query": keyword_query,
+                            "keywords_used": keyword_result.keywords,
+                            "keyword_source": getattr(keyword_result, "source", None),
+                            "llm_keywords_raw": getattr(keyword_result, "llm_keywords_raw", None),
+                            "dropped_keywords": getattr(keyword_result, "dropped_keywords", None),
+                        },
+                        keyword_result,
+                    ),
+                    error=keyword_result.error if not keyword_result.success else None,
+                )
+                steps.append(keyword_step)
+                yield _emit_step(keyword_step)
+                step_num += 1
+
             label = "search_text"
-            args = {"query": search_query, "top_k": 5}
+            args = {"query": keyword_query, "top_k": 5}
             yield _emit_step(AgenticStep(step_num, label, "tool"), "started")
             tool_start = time.perf_counter()
             

@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Dict, List, Optional, Awaitable, Callable
 
@@ -25,6 +26,8 @@ from .prompts import (
     COMPOSER_NO_EVIDENCE_USER_TEMPLATE,
     SEMANTIC_REWRITE_SYSTEM_PROMPT,
     SEMANTIC_REWRITE_USER_TEMPLATE,
+    KEYWORD_GENERATOR_SYSTEM_PROMPT,
+    KEYWORD_GENERATOR_USER_TEMPLATE,
     format_evidence_for_composer,
     INSPECTOR_SYSTEM_PROMPT,
     INSPECTOR_USER_TEMPLATE,
@@ -85,6 +88,21 @@ class QueryRewriteResult:
     """Outcome of the semantic query rewrite helper."""
     success: bool
     rewritten_query: str = ""
+    error: Optional[str] = None
+    raw_response: Optional[str] = None
+    prompt: Optional[str] = None
+    prompt_messages: Optional[List[Dict[str, str]]] = None
+
+
+@dataclass
+class KeywordQueryResult:
+    """Outcome of the keyword generator used for plain-text search."""
+    success: bool
+    keywords: List[str] = field(default_factory=list)
+    keyword_query: str = ""
+    source: str = "original"  # "llm", "fallback_clean", "original"
+    llm_keywords_raw: List[str] = field(default_factory=list)
+    dropped_keywords: List[str] = field(default_factory=list)
     error: Optional[str] = None
     raw_response: Optional[str] = None
     prompt: Optional[str] = None
@@ -350,6 +368,137 @@ async def rewrite_semantic_query(
         return QueryRewriteResult(
             success=False,
             rewritten_query=normalized_original,
+            error=str(e),
+            prompt=user_prompt,
+            prompt_messages=prompt_messages,
+        )
+
+
+async def generate_keywords(
+    original_query: str,
+    user_query: str,
+    llm_client: Any,
+    model: str,
+    *,
+    max_keywords: int = 10,
+    temperature: float = 0.0,
+    max_tokens: int = 200,
+) -> KeywordQueryResult:
+    """Generate a compact keyword query for plain-text search.
+
+    Safety: output is filtered so it cannot introduce new words not present in the original query
+    (diacritic-insensitive). If filtering removes everything, fall back to a deterministic stopword
+    cleanup of the original query.
+    """
+    normalized_original = (original_query or "").strip()
+    user_prompt = KEYWORD_GENERATOR_USER_TEMPLATE.format(
+        user_query=(user_query or "").strip(),
+        subquery=normalized_original or (user_query or "").strip(),
+    )
+    prompt_messages = [
+        {"role": "system", "content": KEYWORD_GENERATOR_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    def _normalize_kw(text: str) -> str:
+        stripped = (text or "").strip()
+        stripped = stripped.strip('"').strip("'")
+        stripped = re.sub(r"\s+", " ", stripped)
+        return stripped.strip()
+
+    def _dedupe_keep_order(items: List[str]) -> List[str]:
+        seen = set()
+        out: List[str] = []
+        for item in items:
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+        return out
+
+    def _fallback_keywords(text: str) -> List[str]:
+        # Simple fallback: just split by spaces and filter short words
+        tokens = [t.strip() for t in text.split()]
+        return [t for t in tokens if len(t) > 2]
+
+    try:
+        response = await llm_client.chat.completions.create(
+            model=model,
+            messages=prompt_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if not response.choices:
+            fallback = _fallback_keywords(normalized_original)
+            return KeywordQueryResult(
+                success=False,
+                keywords=fallback,
+                keyword_query=" ".join(fallback),
+                source="fallback_simple",
+                error="LLM returned no choices",
+                prompt=user_prompt,
+                prompt_messages=prompt_messages,
+            )
+        raw_response = response.choices[0].message.content or ""
+        data = _extract_json(raw_response)
+
+        keywords: List[str] = []
+        if isinstance(data, dict):
+            raw_keywords = data.get("keywords")
+            if isinstance(raw_keywords, list):
+                keywords = [str(x) for x in raw_keywords]
+            elif isinstance(raw_keywords, str):
+                keywords = [raw_keywords]
+        elif isinstance(data, list):
+            keywords = [str(x) for x in data]
+        else:
+            # Fallback: parse common formats like comma-separated keywords.
+            text = raw_response.strip()
+            if text:
+                keywords = [part.strip() for part in re.split(r"[,\n;]+", text) if part.strip()]
+
+        normalized_keywords = []
+        for kw in keywords:
+            normalized = _normalize_kw(kw)
+            if not normalized:
+                continue
+            normalized_keywords.append(normalized)
+
+        normalized_keywords = _dedupe_keep_order(normalized_keywords)
+        safe_max = max(1, int(max_keywords or 10))
+        normalized_keywords = normalized_keywords[:safe_max]
+
+        # Trust the LLM output (no strict filtering against original text)
+        filtered_keywords = normalized_keywords
+        dropped_keywords = []
+
+        source = "llm"
+        if not filtered_keywords:
+            filtered_keywords = _fallback_keywords(normalized_original)
+            source = "fallback_simple"
+
+        keyword_query = " ".join(filtered_keywords).strip()
+
+        return KeywordQueryResult(
+            success=bool(keyword_query.strip()),
+            keywords=filtered_keywords,
+            keyword_query=keyword_query,
+            source=source,
+            llm_keywords_raw=normalized_keywords,
+            dropped_keywords=dropped_keywords,
+            raw_response=raw_response,
+            prompt=user_prompt,
+            prompt_messages=prompt_messages,
+        )
+    except Exception as e:
+        logger.exception("generate_keywords failed: %s", e)
+        fallback = _fallback_keywords(normalized_original)
+        return KeywordQueryResult(
+            success=False,
+            keywords=fallback,
+            keyword_query=" ".join(fallback),
+            source="fallback_simple",
             error=str(e),
             prompt=user_prompt,
             prompt_messages=prompt_messages,

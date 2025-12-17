@@ -12,6 +12,7 @@ flowchart TD
     DQ --> BP["build_initial_plan()"]
     BP --> LOOP{{"for each SubqueryPlan"}}
 
+    LOOP --> GK["generate_keywords()"]
     LOOP --> ST["execute_tool('search_text')"]
     LOOP --> RW["rewrite_semantic_query()"]
     RW --> SS["execute_tool('search_semantic')"]
@@ -42,7 +43,7 @@ flowchart TD
 - **Request intake (`backend/routes/agentic.py`)** – `ask_agentic_stream()` accepts `POST /ask/agentic/stream`, trims the query, ensures processed documents exist, waits for the GPU-phase gate, and instantiates `AsyncOpenAI` plus the local `EmbeddingClient`. It then yields the `StreamingResponse` produced by `stream_agentic_answer()`. Every transport frame is NDJSON with `type: "step"`, `"token"`, or `"final"`.
 - **Decomposition & deterministic planning** – `stream_agentic_answer()` immediately calls `decompose_query()` (LLM-driven) and records the response as `AgenticStep` zero. When decomposition fails, it falls back to a single `{ "subqueries": [{"query": query}] }` structure. `build_initial_plan()` (pure Python) converts the decomposition into `SubqueryPlan` objects, caps the count to `max_subqueries`, and guarantees each plan has at least one `initial_queries` entry so downstream search has a deterministic input.
 - **Retrieval per `SubqueryPlan`** – Every plan deterministically executes the same pair of tools for each subquery (keyword search followed by semantic search), so there is no per-subquery strategy knob:
-  - `execute_tool("search_text")` (top_k=5) executes first and appends results directly to the evidence buffer.
+  - `generate_keywords()` distills the subquery into a compact keyword string (LLM-driven) and then `execute_tool("search_text")` (top_k=5) appends results directly to the evidence buffer.
   - `rewrite_semantic_query()` rewrites the subquery and immediately invokes `execute_tool("search_semantic")` with `top_k=10`. The rewrite emits its own `AgenticStep` before the semantic tool runs, and the semantic hits are filtered by `MIN_CONTEXT_SIMILARITY` before expansion so only ≥0.6 scores reach the evidence buffers.
   Each tool call emits a progress step that includes the request args, counts, and a preview of the top hits. Tools are only ever invoked through the dispatcher in `backend/services/agentic/tools.py`.
 - **Context expansion & evidence hygiene** – Both search tools share the same expansion helpers:

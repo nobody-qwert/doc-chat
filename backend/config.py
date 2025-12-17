@@ -65,6 +65,7 @@ class AppSettings:
     agentic_min_expanded_chars: int
     agentic_max_expanded_chars: int
     agentic_inspector_max_items: int
+    agentic_keyword_max_terms: int
 
 
 def _require_env(name: str) -> str:
@@ -79,6 +80,19 @@ def _require_env(name: str) -> str:
 
 def _int_env(name: str) -> int:
     value = _require_env(name)
+    try:
+        return int(value)
+    except ValueError as exc:  # pragma: no cover - fail fast on misconfiguration
+        raise RuntimeError(f"Environment variable {name} must be an integer (got {value!r})") from exc
+
+
+def _optional_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return int(default)
+    value = str(raw).strip()
+    if value == "":
+        return int(default)
     try:
         return int(value)
     except ValueError as exc:  # pragma: no cover - fail fast on misconfiguration
@@ -144,6 +158,7 @@ def load_settings() -> AppSettings:
     agentic_min_expanded_chars = _int_env("AGENTIC_MIN_EXPANDED_CHARS")
     agentic_max_expanded_chars = _int_env("AGENTIC_MAX_EXPANDED_CHARS")
     agentic_inspector_max_items = _int_env("AGENTIC_INSPECTOR_MAX_ITEMS")
+    agentic_keyword_max_terms = _optional_int_env("AGENTIC_KEYWORD_MAX_TERMS", 10)
     frontend_port = _str_env("FRONTEND_PORT")
     return AppSettings(
         data_dir=data_dir,
@@ -199,4 +214,5 @@ def load_settings() -> AppSettings:
         agentic_min_expanded_chars=agentic_min_expanded_chars,
         agentic_max_expanded_chars=agentic_max_expanded_chars,
         agentic_inspector_max_items=agentic_inspector_max_items,
+        agentic_keyword_max_terms=agentic_keyword_max_terms,
     )
