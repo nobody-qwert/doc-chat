@@ -9,9 +9,6 @@ import DiagnosticsPanel from "./components/DiagnosticsPanel";
 import RetrievalPanel from "./components/RetrievalPanel";
 import useGpuDiagnostics from "./hooks/useGpuDiagnostics";
 
-const ENV_CONTEXT_LIMIT = Number(import.meta.env.VITE_LLM_CONTEXT_SIZE || "10000") || 10000;
-const makeDefaultContextStats = () => ({ used: 0, limit: ENV_CONTEXT_LIMIT, truncated: false, ratio: 0 });
-
 async function readJsonSafe(res) {
   const ct = (res.headers.get("content-type") || "").toLowerCase();
   if (ct.includes("application/json")) { try { return await res.json(); } catch {} }
@@ -288,8 +285,6 @@ const styles = {
   tableCell: { border: "1px solid rgba(148, 163, 184, 0.18)", padding: "8px 10px", textAlign: "left" },
   inlineCode: { background: "rgba(15, 23, 42, 0.6)", borderRadius: 8, padding: "2px 6px", fontSize: 13, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
   codeBlock: { background: "rgba(15, 23, 42, 0.75)", borderRadius: 16, padding: "14px 16px", margin: "12px 0", overflowX: "auto", fontSize: 13, border: "1px solid rgba(148, 163, 184, 0.25)" },
-  contextBadge: { padding: "8px 14px", borderRadius: 14, border: "1px solid rgba(255, 255, 255, 0.6)", fontSize: 12, color: "#ffffff", background: "rgba(12, 14, 22, 0.85)" },
-  contextLabel: { fontSize: 12, color: "#ffffff" },
   kbd: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace' },
 };
 
@@ -316,16 +311,11 @@ const pipelineMarkdownComponents = {
 };
 
 export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemStatus = {} }) {
-  const defaultContextStats = useMemo(() => makeDefaultContextStats(), []);
   const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
   const [messages, setMessages] = useState([]);
-  const [conversationId, setConversationId] = useState(null);
   const [warmingUp, setWarmingUp] = useState(false);
   const [warmedUp, setWarmedUp] = useState(false);
-  const [contextStats, setContextStats] = useState(() => makeDefaultContextStats());
-  const [pendingFollowUp, setPendingFollowUp] = useState(null);
-  const [continuing, setContinuing] = useState(false);
   const [expandedSources, setExpandedSources] = useState({});
   const [expandedStepDetails, setExpandedStepDetails] = useState({});
   const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
@@ -363,17 +353,17 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   }, [messages]);
 
   const api = { askStream: "/api/ask/agentic/stream" };
-  useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp || continuing); }, [asking, warmingUp, continuing, onAskingChange]);
+  useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp); }, [asking, warmingUp, onAskingChange]);
   useEffect(() => {
     const el = messagesBodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
   useEffect(() => {
-    if ((warmingUp && !warmedUp) || pendingFollowUp || continuing) return;
+    if (warmingUp && !warmedUp) return;
     const inputEl = queryInputRef.current;
     if (inputEl) inputEl.focus();
-  }, [warmingUp, warmedUp, pendingFollowUp, continuing]);
+  }, [warmingUp, warmedUp]);
 
   const performWarmup = useCallback(async () => {
     if (!warmupApi || warmedUp || llmReady) return; if (warmupAttemptRef.current) return; warmupAttemptRef.current = true; setWarmingUp(true);
@@ -386,11 +376,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   useEffect(() => { if (llmReady) { setWarmedUp(true); setWarmingUp(false); } }, [llmReady]);
 
   const handleResetConversation = () => {
-    setConversationId(null);
     setMessages([]);
-    setContextStats({ ...defaultContextStats });
-    setPendingFollowUp(null);
-    setContinuing(false);
     setExpandedSources({});
     setExpandedStepDetails({});
   };
@@ -591,9 +577,6 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       }
 
       if (!finalMeta) throw new Error("Stream ended without a final payload");
-      const nextConversationId = finalMeta.conversation_id || payload.conversation_id || conversationId;
-      if (nextConversationId) setConversationId(nextConversationId);
-      const needsFollowUp = !!finalMeta.needs_follow_up;
       const rawEvidenceCount = finalMeta && Object.prototype.hasOwnProperty.call(finalMeta, "evidence_count") ? finalMeta.evidence_count : null;
       let finalEvidenceCount = null;
       if (typeof rawEvidenceCount === "number" && Number.isFinite(rawEvidenceCount)) {
@@ -619,75 +602,40 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             retrievalSources: mergeSources(mergedRetrievalSources, finalMeta.retrieval_sources),
             evidenceCount: finalEvidenceCount,
             inspectorFound,
-            hideSources: needsFollowUp,
-            pendingFollowUp: needsFollowUp,
             finishReason: finalMeta.finish_reason || null,
-            timing: {
-              timeToFirst: finalMeta.time_to_first_token_seconds,
-              generationSeconds: finalMeta.generation_seconds,
-              tokensPerSecond: finalMeta.tokens_per_second,
-            },
+            timing:
+              typeof finalMeta.time_to_first_token_seconds === "number" ||
+              typeof finalMeta.generation_seconds === "number" ||
+              typeof finalMeta.tokens_per_second === "number"
+                ? {
+                    timeToFirst: finalMeta.time_to_first_token_seconds,
+                    generationSeconds: finalMeta.generation_seconds,
+                    tokensPerSecond: finalMeta.tokens_per_second,
+                  }
+                : null,
           };
         }),
       );
-      setContextStats({
-        used: typeof finalMeta.context_tokens_used === "number" ? finalMeta.context_tokens_used : 0,
-        limit: typeof finalMeta.context_window_limit === "number" ? finalMeta.context_window_limit : defaultContextStats.limit,
-        truncated: !!finalMeta.context_truncated,
-        ratio: typeof finalMeta.context_usage === "number" ? finalMeta.context_usage : 0,
-      });
-      setPendingFollowUp(needsFollowUp ? { conversationId: nextConversationId, messageId: assistantId || targetMessageId } : null);
       // When streaming, steps are emitted individually via step events; final steps (if any) are also appended above.
     },
-    [api.askStream, conversationId, defaultContextStats.limit],
+    [api.askStream],
   );
 
   const handleAsk = async () => {
     const trimmed = query.trim();
-    if (!trimmed || (warmingUp && !warmedUp) || pendingFollowUp || continuing) return;
+    if (!trimmed || (warmingUp && !warmedUp)) return;
     setAsking(true);
     const userId = createMessageId();
     setMessages((prev) => [...prev, { id: userId, role: "user", content: trimmed }]);
     setQuery("");
     try {
       const payload = { query: trimmed };
-      if (conversationId) payload.conversation_id = conversationId;
       await runStreamingCompletion({ payload, anchorMessageId: userId });
     } catch (e) {
       setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error: ${e.message || String(e)}`, error: true }]);
     } finally {
       setAsking(false);
     }
-  };
-
-  const handleContinueResponse = async () => {
-    if (!pendingFollowUp || continuing) return;
-    const activeConversationId = pendingFollowUp.conversationId || conversationId;
-    if (!activeConversationId) return;
-    const existingAssistant = messages.find((m) => m.id === pendingFollowUp.messageId) || {};
-    setContinuing(true);
-    try {
-      const payload = { continue_last: true, conversation_id: activeConversationId };
-      await runStreamingCompletion({
-        payload,
-        targetMessageId: pendingFollowUp.messageId,
-        anchorMessageId: pendingFollowUp.messageId,
-        baseContent: existingAssistant.content || "",
-        baseSources: existingAssistant.sources || [],
-        baseRetrievalSources: existingAssistant.retrievalSources || [],
-        baseInspectorFound: existingAssistant.inspectorFound ?? null,
-      });
-    } catch (e) {
-      setMessages((prev) => [...prev, { id: createMessageId(), role: "assistant", content: `Error continuing response: ${e.message || String(e)}`, error: true }]);
-    } finally {
-      setContinuing(false);
-    }
-  };
-
-  const handleAbortContinuation = () => {
-    if (!pendingFollowUp || continuing) return;
-    setMessages((prev) => prev.map((msg) => (msg.id === pendingFollowUp.messageId ? { ...msg, pendingFollowUp: false, hideSources: false, aborted: true } : msg)));
-    setPendingFollowUp(null);
   };
 
   const toggleSourcePreview = (messageId, sourceKey) => {
@@ -731,8 +679,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
           <h2 style={styles.sectionTitle}>Chat Workspace</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button onClick={() => navigate("/ingest")} style={{ ...styles.subtleButton, padding: "8px 16px" }}>Manage Documents</button>
-            <button onClick={handleResetConversation} disabled={!messages.length && !conversationId} style={{ ...styles.subtleButton, padding: "8px 16px", opacity: (!messages.length && !conversationId) ? 0.5 : 1 }}>Reset Chat</button>
-            <ContextIndicator stats={contextStats} defaultLimit={ENV_CONTEXT_LIMIT} />
+            <button onClick={handleResetConversation} disabled={!messages.length} style={{ ...styles.subtleButton, padding: "8px 16px", opacity: !messages.length ? 0.5 : 1 }}>Reset Chat</button>
           </div>
         </div>
 
@@ -895,14 +842,6 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                       </ReactMarkdown>
                     </div>
                   )}
-                  {m.role === "assistant" && m.pendingFollowUp && !m.error && (
-                    <div style={{ ...styles.muted, marginTop: 8 }}>
-                      Response paused because it reached the token limit. Continue or abort to proceed.
-                    </div>
-                  )}
-                  {m.role === "assistant" && m.aborted && !m.error && (
-                    <div style={{ ...styles.muted, marginTop: 8 }}>Generation aborted. You can ask another question.</div>
-                  )}
                   {m.role === "assistant" && m.timing && (
                     <div style={{ ...styles.muted, marginTop: 8, fontSize: 12 }}>
                       {formatTiming(m.timing)}
@@ -962,26 +901,9 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
           )}
         </div>
 
-        {pendingFollowUp && (
-          <div style={{ border: "none", borderRadius: 22, padding: 16, background: "rgba(32, 37, 78, 0.92)", display: "flex", flexDirection: "column", gap: 12, boxShadow: "0 22px 40px rgba(4, 7, 20, 0.55)" }}>
-            <div style={{ ...styles.muted, fontSize: 13 }}>
-              The assistant stopped early (finish reason: {messages.find((m) => m.id === pendingFollowUp.messageId)?.finishReason || "unknown"}).
-              Choose <strong>Continue</strong> to keep generating or <strong>Abort</strong> to accept the current response.
-            </div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={handleAbortContinuation} disabled={continuing} style={{ ...styles.subtleButton, padding: "10px 18px", opacity: continuing ? 0.6 : 1 }}>
-                Abort
-              </button>
-              <button onClick={handleContinueResponse} disabled={continuing} style={{ ...styles.button, opacity: continuing ? 0.6 : 1 }}>
-                {continuing ? "Continuing..." : "Continue"}
-              </button>
-            </div>
-          </div>
-        )}
-
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <input ref={queryInputRef} type="text" placeholder={warmingUp && !warmedUp ? "Warming up model..." : "Ask a question about your docs..."} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !(warmingUp && !warmedUp)) handleAsk(); }} disabled={(warmingUp && !warmedUp) || pendingFollowUp || continuing} style={{ ...styles.input, opacity: (warmingUp && !warmedUp) || pendingFollowUp || continuing ? 0.6 : 1 }} />
-          <button onClick={handleAsk} disabled={asking || !query.trim() || (warmingUp && !warmedUp) || pendingFollowUp || continuing} style={{ ...styles.button, minWidth: 70, letterSpacing: 0.3, opacity: (asking || !query.trim() || (warmingUp && !warmedUp) || pendingFollowUp || continuing) ? 0.6 : 1 }}>
+          <input ref={queryInputRef} type="text" placeholder={warmingUp && !warmedUp ? "Warming up model..." : "Ask a question about your docs..."} value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !(warmingUp && !warmedUp)) handleAsk(); }} disabled={(warmingUp && !warmedUp)} style={{ ...styles.input, opacity: (warmingUp && !warmedUp) ? 0.6 : 1 }} />
+          <button onClick={handleAsk} disabled={asking || !query.trim() || (warmingUp && !warmedUp)} style={{ ...styles.button, minWidth: 70, letterSpacing: 0.3, opacity: (asking || !query.trim() || (warmingUp && !warmedUp)) ? 0.6 : 1 }}>
             {asking ? "Asking..." : warmingUp && !warmedUp ? "Warming up..." : "Ask"}
           </button>
         </div>
@@ -1009,25 +931,6 @@ function ChevronIcon({ expanded }) {
         strokeLinejoin="round"
       />
     </svg>
-  );
-}
-
-function ContextIndicator({ stats, defaultLimit }) {
-  const limit = stats?.limit || defaultLimit || 10000;
-  const used = stats?.used || 0;
-  const percent = limit ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-  const accent = percent >= 85 ? "rgba(248, 113, 113, 0.95)" : percent >= 60 ? "rgba(251, 191, 36, 0.95)" : "rgba(16, 185, 129, 0.95)";
-  const badgeStyle = {
-    ...styles.contextBadge,
-    borderColor: accent,
-    color: accent,
-    background: stats?.truncated ? "rgba(127, 29, 29, 0.25)" : styles.contextBadge.background,
-    boxShadow: stats?.truncated ? "0 0 18px rgba(248, 113, 113, 0.55)" : "none",
-  };
-  return (
-    <span style={badgeStyle} title="Prompt tokens used / max window">
-      Context {used}/{limit} ({percent}%)
-    </span>
   );
 }
 

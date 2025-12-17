@@ -10,14 +10,14 @@ try:
     from ..tokenizer_registry import tokenizer_diagnostics
     from .helpers import format_document_row
     from ..services.ingestion import warmup_mineru
-    from ..services.rag import warmup_llm
+    from ..services.warmup import warmup_llm
     from ..utils.gpu import get_gpu_snapshot
 except ImportError:  # pragma: no cover
     from dependencies import document_store, jobs_registry, settings, gpu_phase_manager  # type: ignore
     from tokenizer_registry import tokenizer_diagnostics  # type: ignore
     from routes.helpers import format_document_row  # type: ignore
     from services.ingestion import warmup_mineru  # type: ignore
-    from services.rag import warmup_llm  # type: ignore
+    from services.warmup import warmup_llm  # type: ignore
     from utils.gpu import get_gpu_snapshot  # type: ignore
 
 router = APIRouter()

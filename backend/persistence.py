@@ -150,39 +150,12 @@ class DocumentStore:
                     """
                 )
 
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS conversations (
-                        conversation_id TEXT PRIMARY KEY,
-                        summary TEXT,
-                        total_tokens INTEGER NOT NULL DEFAULT 0,
-                        created_at TEXT NOT NULL,
-                        updated_at TEXT NOT NULL
-                    )
-                    """
-                )
-
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS conversation_messages (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        conversation_id TEXT NOT NULL,
-                        role TEXT NOT NULL,
-                        content TEXT NOT NULL,
-                        token_count INTEGER NOT NULL,
-                        created_at TEXT NOT NULL,
-                        FOREIGN KEY(conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE
-                    )
-                    """
-                )
-
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_docs_status ON documents(status)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_ext_doc ON extractions(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_chunks_config ON chunks(chunk_config_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_emb_doc ON embeddings(doc_hash)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_perf_doc ON performance_metrics(doc_hash)")
-                await conn.execute("CREATE INDEX IF NOT EXISTS idx_conv_msgs_conv ON conversation_messages(conversation_id, id)")
 
                 if self._chunking_configs:
                     for spec in self._chunking_configs:
@@ -650,97 +623,6 @@ class DocumentStore:
             await conn.execute("DELETE FROM performance_metrics")
             await conn.execute("DELETE FROM embeddings")
             await conn.execute("DELETE FROM chunks")
-            await conn.commit()
-        finally:
-            await conn.close()
-
-    # Conversations
-    async def create_conversation(self, conversation_id: str) -> None:
-        now = _utc_now()
-        conn = await self._conn()
-        try:
-            await conn.execute(
-                """
-                INSERT INTO conversations (conversation_id, summary, total_tokens, created_at, updated_at)
-                VALUES (?, '', 0, ?, ?)
-                ON CONFLICT(conversation_id) DO NOTHING
-                """,
-                (conversation_id, now, now),
-            )
-            await conn.commit()
-        finally:
-            await conn.close()
-
-    async def delete_conversation(self, conversation_id: str) -> None:
-        conn = await self._conn()
-        try:
-            await conn.execute("DELETE FROM conversations WHERE conversation_id=?", (conversation_id,))
-            await conn.commit()
-        finally:
-            await conn.close()
-
-    async def get_conversation(self, conversation_id: str) -> Optional[Dict[str, Any]]:
-        conn = await self._conn()
-        try:
-            cur = await conn.execute(
-                "SELECT * FROM conversations WHERE conversation_id=?",
-                (conversation_id,),
-            )
-            row = await cur.fetchone()
-            return dict(row) if row else None
-        finally:
-            await conn.close()
-
-    async def append_conversation_message(
-        self,
-        conversation_id: str,
-        *,
-        role: str,
-        content: str,
-        token_count: int,
-    ) -> None:
-        now = _utc_now()
-        conn = await self._conn()
-        try:
-            await conn.execute(
-                """
-                INSERT INTO conversation_messages (conversation_id, role, content, token_count, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (conversation_id, role, content, token_count, now),
-            )
-            await conn.execute(
-                "UPDATE conversations SET updated_at=?, total_tokens=total_tokens + ? WHERE conversation_id=?",
-                (now, token_count, conversation_id),
-            )
-            await conn.commit()
-        finally:
-            await conn.close()
-
-    async def fetch_conversation_messages(self, conversation_id: str) -> List[Dict[str, Any]]:
-        conn = await self._conn()
-        try:
-            cur = await conn.execute(
-                """
-                SELECT conversation_id, role, content, token_count, created_at
-                FROM conversation_messages
-                WHERE conversation_id=?
-                ORDER BY id ASC
-                """,
-                (conversation_id,),
-            )
-            rows = await cur.fetchall()
-            return [dict(r) for r in rows]
-        finally:
-            await conn.close()
-
-    async def update_conversation_summary(self, conversation_id: str, summary: str) -> None:
-        conn = await self._conn()
-        try:
-            await conn.execute(
-                "UPDATE conversations SET summary=?, updated_at=? WHERE conversation_id=?",
-                (summary, _utc_now(), conversation_id),
-            )
             await conn.commit()
         finally:
             await conn.close()
