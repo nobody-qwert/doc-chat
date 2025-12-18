@@ -1,7 +1,7 @@
 # CUDA-enabled Qwen3-VL OCR module.
 #
 # Notes:
-# - Uses llama-cpp-python (CUDA) to run `python -m llama_cpp.server` in a managed subprocess.
+# - Builds `llama-server` (llama.cpp) and runs it as a managed subprocess.
 # - Uses PyMuPDF to render PDFs to images, then calls the local OpenAI-compatible endpoint.
 #
 # Building requires network access to fetch python wheels (and llama-cpp-python).
@@ -36,12 +36,7 @@ RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcu
   && python3 -m pip install --upgrade pip \
   && python3 -m pip install --no-cache-dir \
       "uvicorn>=0.30.0" \
-      "anyio>=4.0.0" \
       "fastapi>=0.110" \
-      "starlette>=0.37" \
-      "starlette-context>=0.3.6" \
-      "pydantic-settings>=2.0.0" \
-      "sse-starlette>=2.0.0" \
       "python-multipart>=0.0.9" \
       "httpx>=0.27" \
       "pymupdf>=1.24" \

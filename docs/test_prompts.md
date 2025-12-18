@@ -22,3 +22,6 @@ who is Ion Iliescu
 
 
 i need LAszlo maria's electricity and nat gas bills. i need each bills period and the corresponding total paid. total plata in romaneste
+
+
+da-mi facturile electrica si eon. listeaza in format de tabel numele adresa de consum si suma platita si perioada de facturare pentru fiecare factura
