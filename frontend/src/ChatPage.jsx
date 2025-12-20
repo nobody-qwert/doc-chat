@@ -352,7 +352,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     return [];
   }, [messages]);
 
-  const api = { askStream: "/api/ask/agentic/stream" };
+  const api = { askStream: "/api/ask/agentic/stream", resetHistory: "/api/ask/agentic/reset" };
   useEffect(() => { if (onAskingChange) onAskingChange(asking || warmingUp); }, [asking, warmingUp, onAskingChange]);
   useEffect(() => {
     const el = messagesBodyRef.current;
@@ -375,11 +375,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   useEffect(() => { if (!warmedUp && !llmReady && warmupApi) { void performWarmup(); } }, [warmedUp, llmReady, warmupApi, performWarmup]);
   useEffect(() => { if (llmReady) { setWarmedUp(true); setWarmingUp(false); } }, [llmReady]);
 
-  const handleResetConversation = () => {
+  const handleResetConversation = useCallback(async () => {
     setMessages([]);
     setExpandedSources({});
     setExpandedStepDetails({});
-  };
+    try {
+      await fetch(api.resetHistory, { method: "POST" });
+    } catch (e) {
+      // Ignore reset failures; UI state is still cleared.
+    }
+  }, [api.resetHistory]);
 
   const runStreamingCompletion = useCallback(
     async ({

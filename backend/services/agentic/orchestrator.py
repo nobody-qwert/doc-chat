@@ -23,8 +23,10 @@ from .modes import (
     verify_citations,
     rewrite_semantic_query,
     generate_keywords,
+    summarize_history,
 )
 from .tools import execute_tool, ToolResult
+from tokenizer_registry import count_text_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +49,8 @@ async def stream_agentic_answer(
     embedding_cache: Any,
     llm_client: Any,
     settings: Any,
-    conversation_id: Optional[str] = None,
     max_subqueries: int = 5,
+    history_store: Optional[Any] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Streaming version of agentic RAG.
@@ -70,15 +72,58 @@ async def stream_agentic_answer(
         step_dict["state"] = state
         return json.dumps({"type": "step", "step": step_dict}) + "\n"
     
-    # Step 0: Decompose query
+    step_num = 0
+    context_query = query
+    if history_store is not None:
+        history_messages = await history_store.get_messages()
+        if history_messages:
+            max_history_tokens = max(1, int(settings.chat_context_window * 0.5))
+            history_text = _build_history_text(
+                history_messages,
+                max_history_tokens=max_history_tokens,
+                tokenizer_id=settings.llm_tokenizer_id,
+            )
+            if history_text:
+                history_token_count = _count_tokens(history_text, settings.llm_tokenizer_id)
+                yield _emit_step(AgenticStep(step_num, "Summarize History", "summarize"), "started")
+                summary_start = time.perf_counter()
+                summary_result = await summarize_history(
+                    history_text=history_text,
+                    llm_client=llm_client,
+                    model=model,
+                )
+                summary_duration = time.perf_counter() - summary_start
+                summary_text = (summary_result.summary or "").strip()
+                summary_step = AgenticStep(
+                    step_number=step_num,
+                    name="Summarize History",
+                    kind="summarize",
+                    duration_seconds=summary_duration,
+                    details=_llm_step_details(
+                        {
+                            "history_messages": len(history_messages),
+                            "history_tokens": history_token_count,
+                            "history_token_budget": max_history_tokens,
+                        },
+                        summary_result,
+                    ),
+                    error=summary_result.error if not summary_result.success else None,
+                )
+                steps.append(summary_step)
+                yield _emit_step(summary_step)
+                step_num += 1
+                if summary_result.success and summary_text:
+                    context_query = _merge_summary_with_query(summary_text, query)
+
+    # Decompose query
     decomp_start = time.perf_counter()
-    yield _emit_step(AgenticStep(0, "Decompose Query", "decompose"), "started")
+    yield _emit_step(AgenticStep(step_num, "Decompose Query", "decompose"), "started")
     
-    decomp_result = await decompose_query(query, llm_client, model)
+    decomp_result = await decompose_query(context_query, llm_client, model)
     decomp_duration = time.perf_counter() - decomp_start
     
     step = AgenticStep(
-        step_number=0,
+        step_number=step_num,
         name="Decompose Query",
         kind="decompose",
         duration_seconds=decomp_duration,
@@ -89,21 +134,22 @@ async def stream_agentic_answer(
     )
     steps.append(step)
     yield _emit_step(step)
+    step_num += 1
     
     if not decomp_result.success:
-        decomposition = {"subqueries": [{"query": query}]}
+        decomposition = {"subqueries": [{"query": context_query}]}
     else:
         decomposition = decomp_result.data or {}
 
     # Deterministic search plan derived directly from subqueries
-    plan_result = build_initial_plan(query, decomposition, max_subqueries=max_subqueries)
+    plan_result = build_initial_plan(context_query, decomposition, max_subqueries=max_subqueries)
     max_subqueries = plan_result.max_subqueries or max_subqueries
     for subplan in plan_result.subquery_plans:
         if not subplan.initial_queries:
-            primary = (subplan.subquery or query).strip() or query
+            primary = (subplan.subquery or context_query).strip() or context_query
             subplan.initial_queries = [primary]
         else:
-            primary = (subplan.subquery or query).strip() or query
+            primary = (subplan.subquery or context_query).strip() or context_query
             if primary:
                 subplan.initial_queries[0] = primary
     
@@ -126,7 +172,7 @@ async def stream_agentic_answer(
                 keyword_start = time.perf_counter()
                 keyword_result = await generate_keywords(
                     original_query=search_query,
-                    user_query=query,
+                    user_query=context_query,
                     llm_client=llm_client,
                     model=model,
                     max_keywords=int(getattr(settings, "agentic_keyword_max_terms", 10)),
@@ -193,7 +239,7 @@ async def stream_agentic_answer(
                 rewrite_start = time.perf_counter()
                 rewrite_result = await rewrite_semantic_query(
                     original_query=search_query,
-                    user_query=query,
+                    user_query=context_query,
                     llm_client=llm_client,
                     model=model,
                 )
@@ -324,7 +370,7 @@ async def stream_agentic_answer(
         compose_start = time.perf_counter()
         answer_parts: List[str] = []
         compose_stream = await compose_answer(
-            query,
+            context_query,
             subquery_inspector_evidence,
             llm_client,
             model,
@@ -356,13 +402,14 @@ async def stream_agentic_answer(
             "answer": verified_answer,
             "needs_clarification": False,
             "sources": _build_sources(subquery_inspector_evidence),
-            "conversation_id": conversation_id,
             "steps": [_step_to_dict(s) for s in steps],
             "total_tool_calls": total_tool_calls,
             "evidence_count": len(evidence),
             "finish_reason": "inspector",
             "inspector_found": True,
         }) + "\n"
+        if history_store is not None:
+            await history_store.append_turn(query, verified_answer)
         return
     
     # Prune evidence
@@ -376,7 +423,7 @@ async def stream_agentic_answer(
     
     answer_parts: List[str] = []
     compose_stream = await compose_answer(
-        query,
+        context_query,
         composer_evidence,
         llm_client,
         model,
@@ -414,13 +461,14 @@ async def stream_agentic_answer(
         "answer": verified_answer,
         "needs_clarification": False,
         "sources": _build_sources(composer_evidence),
-        "conversation_id": conversation_id,
         "steps": [_step_to_dict(s) for s in steps],
         "total_tool_calls": total_tool_calls,
         "evidence_count": len(composer_evidence),
         "finish_reason": "complete",
         "inspector_found": inspector_found,
     }) + "\n"
+    if history_store is not None:
+        await history_store.append_turn(query, verified_answer)
 
 
 
@@ -437,6 +485,58 @@ def _deduplicate_evidence(evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]
         elif not chunk_id:
             result.append(item)
     return result
+
+
+def _estimate_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def _count_tokens(text: str, tokenizer_id: str) -> int:
+    tokens = count_text_tokens(text, tokenizer_id)
+    if tokens is None:
+        return _estimate_tokens(text)
+    return int(tokens)
+
+
+def _build_history_text(
+    history_messages: List[Dict[str, Any]],
+    *,
+    max_history_tokens: int,
+    tokenizer_id: str,
+) -> str:
+    if not history_messages:
+        return ""
+    lines: List[str] = []
+    for msg in reversed(history_messages):
+        role = str(msg.get("role") or "").strip().lower()
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        if role == "user":
+            label = "User"
+        elif role == "assistant":
+            label = "Assistant"
+        elif role:
+            label = role.title()
+        else:
+            label = "Message"
+        line = f"{label}: {content}"
+        candidate = [line] + lines
+        candidate_text = "\n".join(candidate)
+        if _count_tokens(candidate_text, tokenizer_id) > max_history_tokens:
+            break
+        lines = candidate
+    return "\n".join(lines)
+
+
+def _merge_summary_with_query(summary: str, query: str) -> str:
+    summary_text = (summary or "").strip()
+    query_text = (query or "").strip()
+    if not summary_text:
+        return query_text
+    return f"Conversation summary:\n{summary_text}\n\nUser question:\n{query_text}"
 
 
 def _prune_evidence(

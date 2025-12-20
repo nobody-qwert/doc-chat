@@ -15,11 +15,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 try:
-    from ..dependencies import document_store, settings, embedding_cache, gpu_phase_manager
+    from ..dependencies import document_store, settings, embedding_cache, gpu_phase_manager, agentic_history
     from ..embeddings import EmbeddingClient
     from ..services.agentic import stream_agentic_answer
 except ImportError:  # pragma: no cover - package import fallback
-    from dependencies import document_store, settings, embedding_cache, gpu_phase_manager  # type: ignore
+    from dependencies import document_store, settings, embedding_cache, gpu_phase_manager, agentic_history  # type: ignore
     from embeddings import EmbeddingClient  # type: ignore
     from services.agentic import stream_agentic_answer  # type: ignore
 
@@ -30,7 +30,6 @@ router = APIRouter(tags=["agentic"])
 class AgenticRequest(BaseModel):
     """Request for agentic RAG endpoint."""
     query: str
-    conversation_id: Optional[str] = None
     max_subqueries: Optional[int] = None
 
 
@@ -79,8 +78,8 @@ async def ask_agentic_stream(req: AgenticRequest):
                 embedding_cache=embedding_cache,
                 llm_client=llm_client,
                 settings=settings,
-                conversation_id=req.conversation_id,
                 max_subqueries=max_subqueries,
+                history_store=agentic_history,
             )
             async for chunk in generator:
                 yield chunk
@@ -93,3 +92,10 @@ async def ask_agentic_stream(req: AgenticRequest):
         event_stream(),
         media_type="application/x-ndjson",
     )
+
+
+@router.post("/ask/agentic/reset")
+async def reset_agentic_history():
+    """Clear the in-memory chat history queue."""
+    await agentic_history.clear()
+    return {"ok": True}

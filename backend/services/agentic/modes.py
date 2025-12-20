@@ -28,6 +28,8 @@ from .prompts import (
     SEMANTIC_REWRITE_USER_TEMPLATE,
     KEYWORD_GENERATOR_SYSTEM_PROMPT,
     KEYWORD_GENERATOR_USER_TEMPLATE,
+    HISTORY_SUMMARY_SYSTEM_PROMPT,
+    HISTORY_SUMMARY_USER_TEMPLATE,
     format_evidence_for_composer,
     INSPECTOR_SYSTEM_PROMPT,
     INSPECTOR_USER_TEMPLATE,
@@ -103,6 +105,17 @@ class KeywordQueryResult:
     source: str = "original"  # "llm", "fallback_clean", "original"
     llm_keywords_raw: List[str] = field(default_factory=list)
     dropped_keywords: List[str] = field(default_factory=list)
+    error: Optional[str] = None
+    raw_response: Optional[str] = None
+    prompt: Optional[str] = None
+    prompt_messages: Optional[List[Dict[str, str]]] = None
+
+
+@dataclass
+class HistorySummaryResult:
+    """Outcome of the chat history summarizer."""
+    success: bool
+    summary: str = ""
     error: Optional[str] = None
     raw_response: Optional[str] = None
     prompt: Optional[str] = None
@@ -368,6 +381,54 @@ async def rewrite_semantic_query(
         return QueryRewriteResult(
             success=False,
             rewritten_query=normalized_original,
+            error=str(e),
+            prompt=user_prompt,
+            prompt_messages=prompt_messages,
+        )
+
+
+async def summarize_history(
+    history_text: str,
+    llm_client: Any,
+    model: str,
+    temperature: float = 0.2,
+    max_tokens: int = 400,
+) -> HistorySummaryResult:
+    """Summarize chat history for follow-up context."""
+    user_prompt = HISTORY_SUMMARY_USER_TEMPLATE.format(history=history_text)
+    prompt_messages = [
+        {"role": "system", "content": HISTORY_SUMMARY_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    try:
+        response = await llm_client.chat.completions.create(
+            model=model,
+            messages=prompt_messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+        if not response.choices:
+            return HistorySummaryResult(
+                success=False,
+                summary="",
+                error="LLM returned no choices",
+                prompt=user_prompt,
+                prompt_messages=prompt_messages,
+            )
+        summary_text = (response.choices[0].message.content or "").strip()
+        success = bool(summary_text)
+        return HistorySummaryResult(
+            success=success,
+            summary=summary_text,
+            raw_response=summary_text,
+            prompt=user_prompt,
+            prompt_messages=prompt_messages,
+        )
+    except Exception as e:
+        logger.exception(f"summarize_history failed: {e}")
+        return HistorySummaryResult(
+            success=False,
+            summary="",
             error=str(e),
             prompt=user_prompt,
             prompt_messages=prompt_messages,

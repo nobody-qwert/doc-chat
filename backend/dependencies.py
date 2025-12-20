@@ -9,16 +9,19 @@ try:  # When imported as part of package
     from .config import load_settings
     from .embedding_cache import EmbeddingCache
     from .persistence import DocumentStore
+    from .services.agentic.history_store import InMemoryHistoryStore
     from .services.gpu_phases import GPUPhaseManager
 except ImportError:  # pragma: no cover - script fallback
     from config import load_settings  # type: ignore
     from embedding_cache import EmbeddingCache  # type: ignore
     from persistence import DocumentStore  # type: ignore
+    from services.agentic.history_store import InMemoryHistoryStore  # type: ignore
     from services.gpu_phases import GPUPhaseManager  # type: ignore
 
 settings = load_settings()
 document_store = DocumentStore(settings.doc_store_path, chunking_configs=settings.chunking_configs)
 embedding_cache = EmbeddingCache()
+agentic_history = InMemoryHistoryStore()
 jobs_registry: Dict[str, Dict[str, Any]] = {}
 gpu_phase_manager = GPUPhaseManager(
     settings.llm_control_url,

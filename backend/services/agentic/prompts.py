@@ -78,6 +78,27 @@ Generate keywords now. Output ONLY the JSON object:"""
 
 
 # =============================================================================
+# HISTORY SUMMARY PROMPTS
+# =============================================================================
+
+HISTORY_SUMMARY_SYSTEM_PROMPT = """You summarize a chat history for follow-up question answering.
+
+STRICT RULES:
+- Use ONLY the provided history content.
+- Do NOT invent or infer new facts.
+- Keep it concise (4-8 short sentences).
+- Preserve key entities, constraints, and unresolved questions.
+- Output plain text only (no bullets, no markdown)."""
+
+HISTORY_SUMMARY_USER_TEMPLATE = """Summarize the conversation so far for future context.
+
+HISTORY:
+{history}
+
+Return a concise summary:"""
+
+
+# =============================================================================
 # ANSWER COMPOSER PROMPTS (MODE 3)
 # =============================================================================
 
