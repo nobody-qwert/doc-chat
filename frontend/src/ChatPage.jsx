@@ -30,6 +30,58 @@ function mergeSources(existing = [], incoming = []) {
   });
   return Array.from(deduped.values());
 }
+function groupSourcesByDocument(sources = []) {
+  if (!Array.isArray(sources) || sources.length === 0) return [];
+  const grouped = new Map();
+  sources.forEach((src, idx) => {
+    if (!src) return;
+    const docHash = src.doc_hash;
+    const docName = src.document_name || "Unknown";
+    const key = docHash || docName || `doc-${idx}`;
+    let entry = grouped.get(key);
+    if (!entry) {
+      entry = {
+        doc_hash: docHash,
+        document_name: docName,
+        citation_ids: [],
+        score: typeof src.score === "number" ? src.score : null,
+        match_type: src.match_type || null,
+        chunk_text: "",
+        chunk_text_preview: "",
+      };
+      grouped.set(key, entry);
+    }
+    const citationId = src.citation_id;
+    if (citationId != null && citationId !== "") {
+      const idStr = String(citationId);
+      if (!entry.citation_ids.includes(idStr)) entry.citation_ids.push(idStr);
+    }
+    if (!entry.chunk_text && typeof src.chunk_text === "string" && src.chunk_text) {
+      entry.chunk_text = src.chunk_text;
+    }
+    if (!entry.chunk_text_preview) {
+      const preview =
+        typeof src.chunk_text_preview === "string" && src.chunk_text_preview
+          ? src.chunk_text_preview
+          : typeof src.text_preview === "string"
+          ? src.text_preview
+          : "";
+      entry.chunk_text_preview = preview;
+    }
+    if (typeof src.score === "number") {
+      entry.score = entry.score == null ? src.score : Math.max(entry.score, src.score);
+    }
+    if (!entry.match_type && src.match_type) entry.match_type = src.match_type;
+  });
+  const result = Array.from(grouped.values());
+  result.forEach((entry) => {
+    if (entry.citation_ids.length > 1) {
+      entry.chunk_text = "";
+      entry.chunk_text_preview = "";
+    }
+  });
+  return result;
+}
 function formatTiming(t) {
   if (!t) return "";
   const parts = [];
@@ -202,7 +254,7 @@ const styles = {
   errorBubble: { alignSelf: "flex-start", background: "rgba(252, 165, 165, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", boxShadow: "0 16px 28px rgba(239, 68, 68, 0.35)" },
   messageRole: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, color: "#ffffff", marginBottom: 2, whiteSpace: "nowrap" },
   sourcesBlock: { fontSize: 12, color: "#ffffff", marginTop: 10 },
-  sourceItem: { marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid rgba(148, 163, 184, 0.08)" },
+  sourceItem: { marginBottom: 6, paddingBottom: 6 },
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
   sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "#ffffff", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
   sourcePreview: {
@@ -778,6 +830,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                   m.sources.length > 0 &&
                   !m.hideSources &&
                   !noEvidence;
+                const displaySources = shouldShowSources ? groupSourcesByDocument(m.sources) : [];
                 const renderPipelineStep = (stepEntry) => {
                   if (!stepEntry) return null;
                   const stepInfo = stepEntry.stepInfo;
@@ -988,8 +1041,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                     <div style={styles.sourcesBlock}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Sources</div>
                       <ol style={{ margin: 0, paddingLeft: 18 }}>
-                        {m.sources.map((s, idx) => {
-                          const sourceKey = `${s.chunk_id || s.doc_hash || idx}-${idx}`;
+                        {displaySources.map((s, idx) => {
+                          const sourceKey = `${s.doc_hash || s.document_name || idx}-${idx}`;
                           const isExpanded = expandedForMessage.includes(sourceKey);
                           const fullChunkText = typeof s.chunk_text === "string" && s.chunk_text.length ? s.chunk_text : "";
                           const fallbackPreview = typeof s.chunk_text_preview === "string" ? s.chunk_text_preview : "";
@@ -997,11 +1050,22 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                           const hasChunkText = chunkText.length > 0;
                           const previewOnly = !fullChunkText && !!fallbackPreview;
                           const chunkDisplayText = previewOnly ? `${chunkText}...` : chunkText;
+                          const citationIds = Array.isArray(s.citation_ids)
+                            ? s.citation_ids
+                            : s.citation_id != null && s.citation_id !== ""
+                            ? [String(s.citation_id)]
+                            : [];
+                          const citationLabel = citationIds.length ? citationIds.map((id) => `[${id}]`).join("") : "";
                           return (
                             <li key={sourceKey} style={styles.sourceItem}>
                               <div style={styles.sourceHeader}>
                                 <div>
                                   <strong style={{ color: "rgba(226, 232, 240, 0.95)" }}>{s.document_name || "unknown"}</strong>
+                                  {citationLabel ? (
+                                    <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(226, 232, 240, 0.75)" }}>
+                                      {citationLabel}
+                                    </span>
+                                  ) : null}
                                   {s.total_chunks > 0 && (
                                     <span style={{ marginLeft: 8, fontSize: 12 }}>
                                       chunk {s.order_index + 1}/{s.total_chunks}
@@ -1009,8 +1073,27 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                                   )}
                                 </div>
                                 {hasChunkText && (
-                                  <button type="button" onClick={() => toggleSourcePreview(m.id, sourceKey)} style={{ ...styles.sourceToggle, opacity: isExpanded ? 0.85 : 1 }}>
-                                    {isExpanded ? "Hide chunk" : "Show chunk"}
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleSourcePreview(m.id, sourceKey)}
+                                    aria-label={isExpanded ? "Hide chunk" : "Show chunk"}
+                                    title={isExpanded ? "Hide chunk" : "Show chunk"}
+                                    style={{
+                                      ...styles.sourceToggle,
+                                      width: 24,
+                                      height: 24,
+                                      padding: 0,
+                                      borderRadius: 8,
+                                      fontSize: 14,
+                                      lineHeight: "24px",
+                                      textAlign: "center",
+                                      background: "transparent",
+                                      boxShadow: "none",
+                                      border: "none",
+                                      opacity: isExpanded ? 0.85 : 1,
+                                    }}
+                                  >
+                                    {isExpanded ? "−" : "+"}
                                   </button>
                                 )}
                               </div>
