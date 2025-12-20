@@ -128,5 +128,5 @@ export default function App() {
 const styles = {
   appShell: { minHeight: "100vh", display: "flex", flexDirection: "column", background: "radial-gradient(circle at top left, rgba(45,55,95,0.35), rgba(15,17,23,0.98) 55%)", color: "#f4f6fb" },
   main: { flex: 1, padding: "16px 16px 16px" },
-  content: { maxWidth: "1200px", margin: "0 auto", width: "100%", padding: "0 4px" },
+  content: { margin: "0 auto", width: "100%", padding: "0 4px" },
 };
