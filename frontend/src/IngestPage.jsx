@@ -110,7 +110,6 @@ const styles = {
   previewLimitCheckbox: { width: 16, height: 16, accentColor: "#818cf8" },
   libraryCard: {
     minWidth: 0,
-    minHeight: 0,
     width: "100%",
     display: "flex",
     flexDirection: "column",

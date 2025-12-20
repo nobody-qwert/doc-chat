@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import DiagnosticsPanel from "./components/DiagnosticsPanel";
+import DocumentViewer from "./components/DocumentViewer";
 import RetrievalPanel from "./components/RetrievalPanel";
 import useGpuDiagnostics from "./hooks/useGpuDiagnostics";
 
@@ -174,6 +175,18 @@ const styles = {
     maxHeight: "calc(100vh - 32px)",
     overflow: "hidden",
   },
+  pageInner: {
+    display: "flex",
+    justifyContent: "center",
+    gap: 18,
+    width: "100%",
+    maxWidth: 1400,
+    height: "100%",
+    padding: "0 12px",
+  },
+  pageInnerSplit: {
+    justifyContent: "space-between",
+  },
   chatCard: {
     flex: "0 1 75%",
     width: "75%",
@@ -188,6 +201,18 @@ const styles = {
     minHeight: 0,
     maxHeight: "100%",
     overflow: "hidden",
+  },
+  chatCardSplit: {
+    flex: "1 1 auto",
+    width: "auto",
+  },
+  viewerPanel: {
+    flex: "0 0 440px",
+    width: 440,
+    maxWidth: 440,
+    height: "100%",
+    display: "flex",
+    flexDirection: "column",
   },
   sectionHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" },
   sectionTitle: { margin: 0, fontSize: 20, fontWeight: 600, letterSpacing: 0.25, color: "#ffffff" },
@@ -256,6 +281,15 @@ const styles = {
   sourcesBlock: { fontSize: 12, color: "#ffffff", marginTop: 10 },
   sourceItem: { marginBottom: 6, paddingBottom: 6 },
   sourceHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" },
+  sourceDocButton: {
+    font: "inherit",
+    padding: 0,
+    border: "none",
+    background: "transparent",
+    color: "#e2e8f0",
+    cursor: "pointer",
+    textAlign: "left",
+  },
   sourceToggle: { font: "inherit", fontSize: 11, padding: "6px 16px", borderRadius: 999, border: "none", background: "rgba(65, 77, 128, 0.96)", color: "#ffffff", cursor: "pointer", boxShadow: "0 14px 24px rgba(3, 6, 18, 0.55)" },
   sourcePreview: {
     fontSize: 13,
@@ -372,6 +406,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   const [expandedSources, setExpandedSources] = useState({});
   const [expandedStepDetails, setExpandedStepDetails] = useState({});
   const [expandedPipelines, setExpandedPipelines] = useState({});
+  const [selectedDoc, setSelectedDoc] = useState(null);
   const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
   const [matchesPanelOpen, setMatchesPanelOpen] = useState(false);
   const warmupAttemptRef = useRef(false);
@@ -434,6 +469,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     setExpandedSources({});
     setExpandedStepDetails({});
     setExpandedPipelines({});
+    setSelectedDoc(null);
     try {
       await fetch(api.resetHistory, { method: "POST" });
     } catch (e) {
@@ -739,6 +775,23 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     setExpandedPipelines((prev) => ({ ...prev, [messageId]: !prev[messageId] }));
   }, []);
 
+  const handleOpenDocument = useCallback((docHash, docName) => {
+    if (!docHash) return;
+    setSelectedDoc({ hash: docHash, name: docName || "Document" });
+  }, []);
+
+  const handleCloseDocument = useCallback(() => {
+    setSelectedDoc(null);
+  }, []);
+
+  const isViewerOpen = !!selectedDoc;
+  const pageInnerStyle = isViewerOpen
+    ? { ...styles.pageInner, ...styles.pageInnerSplit }
+    : styles.pageInner;
+  const chatCardStyle = isViewerOpen
+    ? { ...styles.chatCard, ...styles.chatCardSplit }
+    : styles.chatCard;
+
   return (
     <>
       <DiagnosticsPanel
@@ -751,7 +804,8 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       />
       <RetrievalPanel open={matchesPanelOpen} onToggle={toggleMatchesPanel} sources={latestMatches} />
       <div style={styles.page}>
-        <section style={styles.chatCard}>
+        <div style={pageInnerStyle}>
+        <section style={chatCardStyle}>
         <div style={styles.sectionHeader}>
           <h2 style={styles.sectionTitle}>Chat Workspace</h2>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
@@ -1059,8 +1113,27 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                           return (
                             <li key={sourceKey} style={styles.sourceItem}>
                               <div style={styles.sourceHeader}>
-                                <div>
-                                  <strong style={{ color: "rgba(226, 232, 240, 0.95)" }}>{s.document_name || "unknown"}</strong>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenDocument(s.doc_hash, s.document_name)}
+                                    disabled={!s.doc_hash}
+                                    title={s.doc_hash ? "Click to view original document" : "Document unavailable"}
+                                    aria-label={s.doc_hash ? "Click to view original document" : "Document unavailable"}
+                                    style={{
+                                      ...styles.sourceDocButton,
+                                      opacity: s.doc_hash ? 1 : 0.6,
+                                      cursor: s.doc_hash ? "pointer" : "default",
+                                    }}
+                                  >
+                                    <strong
+                                      style={{
+                                        color: selectedDoc?.hash === s.doc_hash ? "#e0f2fe" : "rgba(226, 232, 240, 0.95)",
+                                      }}
+                                    >
+                                      {s.document_name || "unknown"}
+                                    </strong>
+                                  </button>
                                   {citationLabel ? (
                                     <span style={{ marginLeft: 8, fontSize: 12, color: "rgba(226, 232, 240, 0.75)" }}>
                                       {citationLabel}
@@ -1128,7 +1201,16 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
           </button>
         </div>
       </section>
-
+      {isViewerOpen && (
+        <aside style={styles.viewerPanel}>
+          <DocumentViewer
+            docHash={selectedDoc?.hash}
+            docName={selectedDoc?.name}
+            onClose={handleCloseDocument}
+          />
+        </aside>
+      )}
+      </div>
     </div>
     </>
   );

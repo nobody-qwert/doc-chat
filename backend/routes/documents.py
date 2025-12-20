@@ -174,3 +174,21 @@ async def get_document_asset(doc_hash: str, asset_path: str):
         raise HTTPException(status_code=404, detail="Asset not found")
 
     return FileResponse(target_path)
+
+
+@router.get("/documents/{doc_hash}/file")
+async def get_document_file(doc_hash: str):
+    doc = await document_store.get_document(doc_hash)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    stored_name = doc.get("stored_name") or doc_hash
+    file_path = (settings.data_dir / stored_name).resolve()
+    allowed_root = settings.data_dir.resolve()
+    try:
+        file_path.relative_to(allowed_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid document path")
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Document file not found")
+    media_type = "application/pdf" if file_path.suffix.lower() == ".pdf" else "application/octet-stream"
+    return FileResponse(file_path, media_type=media_type, filename=doc.get("original_name") or stored_name)
