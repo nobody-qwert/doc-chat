@@ -563,13 +563,17 @@ def _build_sources(evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Build source list for response."""
     sources = []
     for item in evidence:
+        full_text = item.get("chunk_text") or item.get("text") or item.get("content") or ""
+        preview_text = full_text[:400] if full_text else ""
         sources.append({
             "citation_id": item.get("citation_id"),
             "doc_hash": item.get("doc_hash"),
             "chunk_id": item.get("chunk_id"),
             "document_name": item.get("document_name", "Unknown"),
             "score": item.get("score", 0),
-            "text_preview": item.get("text", "")[:200],
+            "text_preview": preview_text,
+            "chunk_text": full_text,
+            "chunk_text_preview": preview_text,
             "match_type": item.get("match_type", "unknown"),
         })
     return sources
@@ -601,14 +605,15 @@ def _inspector_hits_to_evidence(hits: List[Dict[str, Any]]) -> List[Dict[str, An
             continue
         if dedupe_key:
             seen_docs.add(dedupe_key)
-        parts = []
         quote = hit.get("quote") or ""
         text = f"Quote: {quote}" if quote else ""
+        evidence_text = hit.get("evidence_text") or ""
         evidence.append({
             "doc_hash": doc_hash,
             "chunk_id": f"inspector_{idx}",
             "order_index": idx - 1,
             "text": text,
+            "chunk_text": evidence_text,
             "document_name": doc_name,
             "match_type": "inspector",
         })

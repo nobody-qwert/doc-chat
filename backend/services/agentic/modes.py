@@ -782,10 +782,12 @@ async def inspect_evidence(
         if not data or not found:
             continue
         
+        raw_text = item.get("text", item.get("content", "")) or ""
         hits.append({
             "quote": data.get("quote"),
             "doc_hash": doc_hash,
             "doc_name": doc_name,
+            "evidence_text": raw_text,
         })
         last_response = raw_response
         last_prompt = user_prompt
