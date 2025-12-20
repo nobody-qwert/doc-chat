@@ -198,6 +198,7 @@ const styles = {
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
     fontSize: 13,
   },
+  pipelineExpandedList: { display: "flex", flexDirection: "column", gap: 4, marginTop: 6, marginLeft: 18 },
   errorBubble: { alignSelf: "flex-start", background: "rgba(252, 165, 165, 0.32)", borderRadius: 22, padding: 15, maxWidth: "95%", boxShadow: "0 16px 28px rgba(239, 68, 68, 0.35)" },
   messageRole: { fontSize: 11, textTransform: "uppercase", letterSpacing: 0.8, color: "#ffffff", marginBottom: 2, whiteSpace: "nowrap" },
   sourcesBlock: { fontSize: 12, color: "#ffffff", marginTop: 10 },
@@ -318,6 +319,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
   const [warmedUp, setWarmedUp] = useState(false);
   const [expandedSources, setExpandedSources] = useState({});
   const [expandedStepDetails, setExpandedStepDetails] = useState({});
+  const [expandedPipelines, setExpandedPipelines] = useState({});
   const [activeDiagnosticsPanel, setActiveDiagnosticsPanel] = useState(null);
   const [matchesPanelOpen, setMatchesPanelOpen] = useState(false);
   const warmupAttemptRef = useRef(false);
@@ -379,6 +381,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     setMessages([]);
     setExpandedSources({});
     setExpandedStepDetails({});
+    setExpandedPipelines({});
     try {
       await fetch(api.resetHistory, { method: "POST" });
     } catch (e) {
@@ -455,7 +458,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       // Steps belong to a specific ask/turn; anchorKey keeps steps per request separate
       const anchorKey = anchorMessageId || targetMessageId || assistantId || "run";
 
-      const upsertStepBubble = (stepInfo) => {
+      const upsertPipelineSummary = (stepInfo) => {
         if (!stepInfo) return;
         const key =
           stepInfo.order != null ? `order-${stepInfo.order}` : `${stepInfo.name || stepInfo.kind || "step"}-${stepInfo.kind || "unk"}`;
@@ -471,32 +474,44 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
         setMessages((prev) => {
           const next = [...prev];
           const anchorIdx = next.findIndex((m) => m.id === anchorMessageId || m.id === targetMessageId || m.id === assistantId);
-          const lastPipelineIdx = next.reduce((acc, m, idx) => {
-            const isPipeline = m.role === "system" && (m.title || "").toLowerCase() === "pipeline";
-            if (!isPipeline) return acc;
-            if (m.anchorKey && m.anchorKey === anchorKey) return Math.max(acc, idx);
-            return acc;
-          }, -1);
-          const insertionIdx =
-            lastPipelineIdx >= 0 && next[lastPipelineIdx]?.anchorKey === anchorKey
-              ? lastPipelineIdx + 1
-              : anchorIdx >= 0
-              ? anchorIdx + 1
-              : next.length;
-          const existingIdx = next.findIndex((m) => m.stepKey === stepKey);
-          if (existingIdx >= 0) {
-            next[existingIdx] = { ...next[existingIdx], content: decoratedLine, state: stepInfo.state, isPipeline: true, stepInfo: stepPayload };
+          const existingSummaryIdx = next.findIndex(
+            (m) => m.isPipelineSummary && m.anchorKey === anchorKey,
+          );
+          const stepEntry = {
+            stepKey,
+            content: decoratedLine,
+            state: stepInfo.state,
+            order: stepInfo.order ?? null,
+            stepInfo: stepPayload,
+          };
+          if (existingSummaryIdx >= 0) {
+            const summary = next[existingSummaryIdx];
+            const existingSteps = Array.isArray(summary.pipelineSteps) ? summary.pipelineSteps.slice() : [];
+            const existingStepIdx = existingSteps.findIndex((s) => s.stepKey === stepKey);
+            if (existingStepIdx >= 0) {
+              existingSteps[existingStepIdx] = { ...existingSteps[existingStepIdx], ...stepEntry };
+            } else {
+              existingSteps.push(stepEntry);
+            }
+            next[existingSummaryIdx] = {
+              ...summary,
+              content: decoratedLine,
+              state: stepInfo.state,
+              pipelineSteps: existingSteps,
+              latestStepKey: stepKey,
+            };
           } else {
+            const insertionIdx = anchorIdx >= 0 ? anchorIdx + 1 : next.length;
             next.splice(insertionIdx, 0, {
               id: createMessageId(),
               role: "system",
               title: "Pipeline",
-              isPipeline: true,
+              isPipelineSummary: true,
               content: decoratedLine,
-              stepKey,
               state: stepInfo.state,
               anchorKey,
-              stepInfo: stepPayload,
+              pipelineSteps: [stepEntry],
+              latestStepKey: stepKey,
             });
           }
           return next;
@@ -538,7 +553,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
           } else if (evt.type === "step") {
             const steps = Array.isArray(evt.step) ? evt.step : [evt.step];
             steps.filter(Boolean).forEach((s) => {
-              upsertStepBubble(s);
+              upsertPipelineSummary(s);
               trackInspectorFinding(s);
             });
           } else if (evt.type === "final") {
@@ -595,7 +610,7 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
       const consolidatedSteps = Array.isArray(finalMeta.steps) ? finalMeta.steps : [];
       if (consolidatedSteps.length) {
         const sortedSteps = consolidatedSteps.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-        sortedSteps.forEach((s) => upsertStepBubble(s));
+        sortedSteps.forEach((s) => upsertPipelineSummary(s));
       }
       setMessages((prev) =>
         prev.map((msg) => {
@@ -662,9 +677,14 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
     });
   };
 
-  const toggleStepDetails = useCallback((messageId) => {
+  const toggleStepDetails = useCallback((detailKey) => {
+    if (!detailKey) return;
+    setExpandedStepDetails((prev) => ({ ...prev, [detailKey]: !prev[detailKey] }));
+  }, []);
+
+  const togglePipelineSteps = useCallback((messageId) => {
     if (!messageId) return;
-    setExpandedStepDetails((prev) => ({ ...prev, [messageId]: !prev[messageId] }));
+    setExpandedPipelines((prev) => ({ ...prev, [messageId]: !prev[messageId] }));
   }, []);
 
   return (
@@ -703,26 +723,35 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
             <div style={styles.messageList}>
               {messages.map((m, i) => {
                 const expandedForMessage = expandedSources[m.id] || [];
-                const isPipeline = m.isPipeline || (m.role === "system" && (m.title || "").toLowerCase() === "pipeline");
-                const stepInfo = isPipeline ? m.stepInfo : null;
-                const hasStepMetadata = !!(stepInfo && (stepInfo.error || (stepInfo.details && Object.keys(stepInfo.details).length > 0)));
-                const stepDetailsExpanded = !!expandedStepDetails[m.id];
-                const pipelineToggleTitle = hasStepMetadata
-                  ? stepDetailsExpanded
-                    ? "Hide step details"
-                    : "Show step details"
-                  : "No structured details for this step";
+                const isPipeline = m.isPipelineSummary || m.isPipeline || (m.role === "system" && (m.title || "").toLowerCase() === "pipeline");
+                const isPipelineSummary = isPipeline && (m.isPipelineSummary || Array.isArray(m.pipelineSteps));
+                const pipelineSteps = isPipelineSummary && Array.isArray(m.pipelineSteps) ? m.pipelineSteps : [];
+                const orderedPipelineSteps = isPipelineSummary
+                  ? pipelineSteps.slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                  : [];
+                const pipelineExpanded = isPipelineSummary ? !!expandedPipelines[m.id] : false;
+                const latestStepEntry =
+                  isPipelineSummary && pipelineSteps.length
+                    ? pipelineSteps.find((s) => s.stepKey === m.latestStepKey) || pipelineSteps[pipelineSteps.length - 1]
+                    : null;
+                const summaryStepInfo = latestStepEntry?.stepInfo || (!isPipelineSummary && isPipeline ? m.stepInfo : null);
+                const summaryHasSteps = isPipelineSummary ? pipelineSteps.length > 0 : !!summaryStepInfo;
+                const pipelineToggleTitle = summaryHasSteps
+                  ? pipelineExpanded
+                    ? "Hide steps"
+                    : "Show steps"
+                  : "No steps available";
                 const pipelineToggleStyle = {
                   ...styles.pipelineSummaryToggle,
-                  ...(stepDetailsExpanded ? styles.pipelineSummaryToggleActive : {}),
-                  cursor: hasStepMetadata ? "pointer" : "default",
-                  opacity: hasStepMetadata ? 1 : 0.5,
+                  ...(pipelineExpanded ? styles.pipelineSummaryToggleActive : {}),
+                  cursor: summaryHasSteps ? "pointer" : "default",
+                  opacity: summaryHasSteps ? 1 : 0.5,
                 };
                 const pipelineMatchMeta =
-                  isPipeline && stepInfo && stepInfo.kind === "inspect" && stepInfo.details
-                    ? matchTypeMetadata(stepInfo.details.match_type)
+                  summaryStepInfo && summaryStepInfo.kind === "inspect" && summaryStepInfo.details
+                    ? matchTypeMetadata(summaryStepInfo.details.match_type)
                     : null;
-                const pipelineFound = Boolean(stepInfo?.details?.found);
+                const pipelineFound = Boolean(summaryStepInfo?.details?.found);
                 const bubbleStyle = m.error
                   ? styles.errorBubble
                   : m.role === "user"
@@ -749,6 +778,113 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                   m.sources.length > 0 &&
                   !m.hideSources &&
                   !noEvidence;
+                const renderPipelineStep = (stepEntry) => {
+                  if (!stepEntry) return null;
+                  const stepInfo = stepEntry.stepInfo;
+                  const hasStepMetadata = !!(stepInfo && (stepInfo.error || (stepInfo.details && Object.keys(stepInfo.details).length > 0)));
+                  const stepDetailsExpanded = !!expandedStepDetails[stepEntry.stepKey];
+                  const stepToggleTitle = hasStepMetadata
+                    ? stepDetailsExpanded
+                      ? "Hide step details"
+                      : "Show step details"
+                    : "No structured details for this step";
+                  const stepToggleStyle = {
+                    ...styles.pipelineSummaryToggle,
+                    ...(stepDetailsExpanded ? styles.pipelineSummaryToggleActive : {}),
+                    cursor: hasStepMetadata ? "pointer" : "default",
+                    opacity: hasStepMetadata ? 1 : 0.5,
+                  };
+                  const stepMatchMeta =
+                    stepInfo && stepInfo.kind === "inspect" && stepInfo.details
+                      ? matchTypeMetadata(stepInfo.details.match_type)
+                      : null;
+                  const stepFound = Boolean(stepInfo?.details?.found);
+                  return (
+                    <div key={stepEntry.stepKey} style={styles.pipelineStepWrapper}>
+                      <div style={styles.pipelineSummaryRow}>
+                        <button
+                          type="button"
+                          title={stepToggleTitle}
+                          aria-label={stepToggleTitle}
+                          aria-expanded={hasStepMetadata ? stepDetailsExpanded : undefined}
+                          onClick={hasStepMetadata ? () => toggleStepDetails(stepEntry.stepKey) : undefined}
+                          disabled={!hasStepMetadata}
+                          style={{
+                            ...stepToggleStyle,
+                            cursor: hasStepMetadata ? "pointer" : "not-allowed",
+                          }}
+                        >
+                          {hasStepMetadata ? (
+                            <ChevronIcon expanded={stepDetailsExpanded} />
+                          ) : (
+                            <span style={styles.pipelineChevronPlaceholder} />
+                          )}
+                        </button>
+                        {stepMatchMeta ? (
+                          <span
+                            title={stepMatchMeta.label}
+                            style={{
+                              width: stepFound ? 12 : 6,
+                              height: stepFound ? 12 : 6,
+                              borderRadius: "50%",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              border: stepFound ? `1px solid ${stepMatchMeta.color}` : "none",
+                              padding: stepFound ? 1 : 0,
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                display: "inline-block",
+                                background: stepMatchMeta.color,
+                              }}
+                            />
+                          </span>
+                        ) : null}
+                        <div
+                          style={{
+                            ...styles.pipelineSummaryText,
+                            cursor: hasStepMetadata ? "pointer" : "default",
+                          }}
+                          role={hasStepMetadata ? "button" : undefined}
+                          tabIndex={hasStepMetadata ? 0 : undefined}
+                          onClick={hasStepMetadata ? () => toggleStepDetails(stepEntry.stepKey) : undefined}
+                          onKeyDown={
+                            hasStepMetadata
+                              ? (evt) => {
+                                  if (evt.key === "Enter" || evt.key === " ") {
+                                    evt.preventDefault();
+                                    toggleStepDetails(stepEntry.stepKey);
+                                  }
+                                }
+                              : undefined
+                          }
+                          title={hasStepMetadata ? stepToggleTitle : undefined}
+                          aria-expanded={hasStepMetadata ? stepDetailsExpanded : undefined}
+                        >
+                          <div style={styles.markdownCompact}>
+                            <ReactMarkdown
+                              remarkPlugins={markdownRemarkPlugins}
+                              rehypePlugins={markdownRehypePlugins}
+                              components={pipelineMarkdownComponents}
+                            >
+                              {stepEntry.content || ""}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                      </div>
+                      {hasStepMetadata && stepDetailsExpanded ? (
+                        <div style={styles.stepDetailsPanel}>
+                          <StepDetails stepInfo={stepInfo} />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                };
                 return (
                   <div key={m.id || `${m.role}-${i}-${Math.abs(m.content?.length || 0)}`} style={bubbleStyle}>
                   {roleLabel ? <div style={styles.messageRole}>{roleLabel}</div> : null}
@@ -759,19 +895,15 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                           type="button"
                           title={pipelineToggleTitle}
                           aria-label={pipelineToggleTitle}
-                          aria-expanded={hasStepMetadata ? stepDetailsExpanded : undefined}
-                          onClick={hasStepMetadata ? () => toggleStepDetails(m.id) : undefined}
-                          disabled={!hasStepMetadata}
+                          aria-expanded={summaryHasSteps ? pipelineExpanded : undefined}
+                          onClick={summaryHasSteps ? () => togglePipelineSteps(m.id) : undefined}
+                          disabled={!summaryHasSteps}
                           style={{
                             ...pipelineToggleStyle,
-                            cursor: hasStepMetadata ? "pointer" : "not-allowed",
+                            cursor: summaryHasSteps ? "pointer" : "not-allowed",
                           }}
                         >
-                          {hasStepMetadata ? (
-                            <ChevronIcon expanded={stepDetailsExpanded} />
-                          ) : (
-                            <span style={styles.pipelineChevronPlaceholder} />
-                          )}
+                          <ChevronIcon expanded={pipelineExpanded} />
                         </button>
                         {pipelineMatchMeta ? (
                           <span
@@ -801,23 +933,23 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                         <div
                           style={{
                             ...styles.pipelineSummaryText,
-                            cursor: hasStepMetadata ? "pointer" : "default",
+                            cursor: summaryHasSteps ? "pointer" : "default",
                           }}
-                          role={hasStepMetadata ? "button" : undefined}
-                          tabIndex={hasStepMetadata ? 0 : undefined}
-                          onClick={hasStepMetadata ? () => toggleStepDetails(m.id) : undefined}
+                          role={summaryHasSteps ? "button" : undefined}
+                          tabIndex={summaryHasSteps ? 0 : undefined}
+                          onClick={summaryHasSteps ? () => togglePipelineSteps(m.id) : undefined}
                           onKeyDown={
-                            hasStepMetadata
+                            summaryHasSteps
                               ? (evt) => {
                                   if (evt.key === "Enter" || evt.key === " ") {
                                     evt.preventDefault();
-                                    toggleStepDetails(m.id);
+                                    togglePipelineSteps(m.id);
                                   }
                                 }
                               : undefined
                           }
-                          title={hasStepMetadata ? pipelineToggleTitle : undefined}
-                          aria-expanded={hasStepMetadata ? stepDetailsExpanded : undefined}
+                          title={summaryHasSteps ? pipelineToggleTitle : undefined}
+                          aria-expanded={summaryHasSteps ? pipelineExpanded : undefined}
                         >
                           <div style={markdownStyle}>
                             <ReactMarkdown
@@ -830,9 +962,9 @@ export default function ChatPage({ onAskingChange, warmupApi, llmReady, systemSt
                           </div>
                         </div>
                       </div>
-                      {hasStepMetadata && stepDetailsExpanded ? (
-                        <div style={styles.stepDetailsPanel}>
-                          <StepDetails stepInfo={stepInfo} />
+                      {isPipelineSummary && pipelineExpanded ? (
+                        <div style={styles.pipelineExpandedList}>
+                          {orderedPipelineSteps.map((stepEntry) => renderPipelineStep(stepEntry))}
                         </div>
                       ) : null}
                     </div>
