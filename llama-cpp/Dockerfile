@@ -30,7 +30,7 @@ RUN ln -s /usr/local/cuda/lib64/stubs/libcuda.so /usr/lib/x86_64-linux-gnu/libcu
 
 WORKDIR /app
 
-COPY llm_controller.py /app/llm_controller.py
+COPY llm_controller.py multimodal_server.py /app/
 
 ENV PYTHONPATH="/app:${PYTHONPATH}"
 

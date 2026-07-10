@@ -158,6 +158,7 @@ async def _stop_llm(reason: str) -> Dict[str, Any]:
 
 
 async def _monitor_process(proc: subprocess.Popen[Any]) -> None:
+    global _process
     try:
         await asyncio.to_thread(proc.wait)
     finally:

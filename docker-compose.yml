@@ -102,7 +102,7 @@ services:
       LLAMA_CUBLAS: "1"
       LLM_CONTROL_PORT: ${LLM_CONTROL_PORT}
       LLM_SERVER_CMD: >-
-        python3 -m llama_cpp.server
+        python3 /app/multimodal_server.py
         --model /models/llm/${LLM_MODEL_FILE}
         --model_alias ${LLM_MODEL}
         --clip_model_path /models/llm/${LLM_MMPROJ_FILE}
