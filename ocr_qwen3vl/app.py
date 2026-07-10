@@ -117,6 +117,15 @@ def _strip_image_syntax(text: str) -> str:
     return cleaned.strip()
 
 
+def _strip_thinking(text: str) -> str:
+    """Keep only the final answer when Qwen emits an internal thinking block."""
+    if not text:
+        return text
+    if "</think>" in text:
+        return text.rsplit("</think>", 1)[-1].strip()
+    return text
+
+
 DATA_DIR = Path(_require_env("DATA_DIR"))
 INDEX_DIR = Path(_require_env("INDEX_DIR"))
 OCR_OUTPUT_DIR = Path(_require_env("OCR_OUTPUT_DIR"))
@@ -367,7 +376,9 @@ async def _process_job(job: OCRJob, *, options: Dict[str, Any]) -> None:
             text = await qwen_vl_ocr_image(settings=vl_settings, image_bytes=page.png_bytes, prompt=prompt)
             # Strip code fences that Qwen VL sometimes wraps around markdown output
             # Strip fake image URLs that Qwen VL hallucinates (e.g., imgur.com links)
-            cleaned = _strip_image_syntax(_strip_code_fences((text or "").strip()))
+            cleaned = _strip_image_syntax(
+                _strip_code_fences(_strip_thinking((text or "").strip()))
+            )
             page_texts.append(cleaned)
             per_page.append({
                 "page": idx,

@@ -35,10 +35,8 @@ services:
     build:
       context: ./ocr_qwen3vl
       dockerfile: Dockerfile
-      args:
-        PREFETCH_MODELS: ${PREFETCH_MODELS}
-        LLAMA_CPP_PYTHON_REF: ${LLAMA_CPP_PYTHON_REF:-main}
-        LLAMA_CPP_PYTHON_CACHE_BUST: ${LLAMA_CPP_PYTHON_CACHE_BUST:-1}
+    depends_on:
+      - llm-inference
     env_file:
       - .env
       - ./ocr_qwen3vl/qwen3.env
@@ -50,16 +48,8 @@ services:
       OCR_OUTPUT_DIR: ${OCR_OUTPUT_DIR}
       OCR_INCOMING_DIR: ${OCR_INCOMING_DIR}
       OCR_WARMUP_DIR: ${OCR_WARMUP_DIR}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     volumes:
       - ${HOST_APP_DATA}:${APP_DATA_ROOT}
-      - ./models/vl:/models/vl:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -113,11 +103,13 @@ services:
       LLM_CONTROL_PORT: ${LLM_CONTROL_PORT}
       LLM_SERVER_CMD: >-
         python3 -m llama_cpp.server
-        --model /models/llm/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf
-        --model_alias default
+        --model /models/llm/${LLM_MODEL_FILE}
+        --model_alias ${LLM_MODEL}
+        --clip_model_path /models/llm/${LLM_MMPROJ_FILE}
+        --chat_format mtmd
+        --chat_template_kwargs '{"enable_thinking": false}'
         --host 0.0.0.0
         --port 8000
-        --chat_format chatml
         --n_ctx ${LLM_CONTEXT_SIZE}
         --n_batch ${LLM_BATCH_SIZE}
         --n_gpu_layers -1
