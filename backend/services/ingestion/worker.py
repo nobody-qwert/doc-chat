@@ -121,8 +121,11 @@ def _init_job_entry(job_id: str, docs: Sequence[QueuedBatchDoc], *, phases: Sequ
 
 
 async def _ensure_phase_resources(phase: str, job_id: str) -> None:
-    if phase == "ocr" and settings.ocr_parser_key == "qwen3_vl":
-        # Qwen3.6 vision OCR shares the already-loaded LLM process.
+    if phase in {"ocr", "postprocess"} and settings.ocr_parser_key == "qwen3_vl":
+        # Qwen3.6 vision OCR shares the LLM process, and the embedding service
+        # fits alongside it. Keep the shared process loaded between OCR and
+        # post-processing instead of unloading the endpoint the OCR adapter
+        # itself depends on.
         await gpu_phase_manager.switch_to_llm(reason=f"{phase}:{job_id}")
     elif phase in {"ocr", "postprocess"}:
         await gpu_phase_manager.switch_to_no_llm(reason=f"{phase}:{job_id}")
