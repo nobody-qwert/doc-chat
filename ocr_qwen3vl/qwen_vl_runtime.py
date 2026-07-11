@@ -312,8 +312,8 @@ class QwenVLServer:
         # Use a longer deadline for model loading - large VL models can take 60+ seconds
         deadline = time.perf_counter() + max(120.0, self._settings.request_timeout * 2)
         last_error: Optional[Exception] = None
-        health_url = f"{self._settings.api_base.rstrip('/')}/health"
-        
+        models_url = f"{self._settings.api_base.rstrip('/')}/models"
+
         # First wait for TCP port to be available
         port_ready = False
         while time.perf_counter() < deadline and not port_ready:
@@ -348,8 +348,10 @@ class QwenVLServer:
                 raise RuntimeError(f"Qwen3-VL server port not ready on {host}:{port}: {last_error}") from last_error
             raise RuntimeError(f"Qwen3-VL server port not ready on {host}:{port}")
         
-        # Now wait for the /health endpoint to return 200 (model fully loaded)
-        logger.info("Port %s:%s is open, waiting for model to load (checking /health)...", host, port)
+        # The shared llama-cpp server exposes the OpenAI-compatible /v1/models
+        # endpoint, but not /health. A non-empty model list means its model is
+        # loaded and it can accept OCR completion requests.
+        logger.info("Port %s:%s is open, waiting for model to load (checking /models)...", host, port)
         timeout = httpx.Timeout(5.0, connect=2.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
             while time.perf_counter() < deadline:
@@ -362,25 +364,24 @@ class QwenVLServer:
                             f"\n--- server log tail ---\n{tail}"
                         )
                 try:
-                    resp = await client.get(health_url)
+                    resp = await client.get(models_url)
                     if resp.status_code == 200:
                         data = resp.json()
-                        status = data.get("status", "unknown")
-                        if status == "ok":
-                            logger.info("Qwen3-VL server is ready (health status: %s)", status)
+                        models = data.get("data")
+                        if isinstance(models, list) and models:
+                            logger.info("Qwen3-VL server is ready (models=%s)", len(models))
                             return
-                        # Server responded but model still loading
-                        logger.debug("Health check returned status=%s, waiting...", status)
+                        logger.debug("Model list is empty or invalid, waiting...")
                     else:
-                        logger.debug("Health check returned %s, waiting...", resp.status_code)
+                        logger.debug("Model readiness check returned %s, waiting...", resp.status_code)
                 except Exception as exc:
                     last_error = exc
-                    logger.debug("Health check failed: %s, waiting...", exc)
+                    logger.debug("Model readiness check failed: %s, waiting...", exc)
                 await asyncio.sleep(1.0)
         
         if last_error:
-            raise RuntimeError(f"Qwen3-VL server not ready (health check failed): {last_error}") from last_error
-        raise RuntimeError(f"Qwen3-VL server not ready (health check timed out)")
+            raise RuntimeError(f"Qwen3-VL server not ready (model check failed): {last_error}") from last_error
+        raise RuntimeError("Qwen3-VL server not ready (model check timed out)")
 
     def _start_log_thread(self, proc: subprocess.Popen[Any]) -> None:
         stdout = proc.stdout

@@ -114,6 +114,8 @@ services:
         --n_batch ${LLM_BATCH_SIZE}
         --n_gpu_layers -1
         --flash_attn true
+        --type_k ${LLM_CACHE_TYPE_K}
+        --type_v ${LLM_CACHE_TYPE_V}
         --use_mlock true
       LLM_SERVER_SHUTDOWN_TIMEOUT: ${LLM_SERVER_SHUTDOWN_TIMEOUT}
       LOG_LEVEL: ${LOG_LEVEL}
@@ -140,7 +142,12 @@ services:
       --port 8080
       --embedding true
       --n_ctx ${EMBED_CONTEXT_SIZE}
+      --n_batch ${EMBED_BATCH_SIZE}
+      --n_ubatch ${EMBED_UBATCH_SIZE}
       --n_gpu_layers -1
+      --flash_attn true
+      --type_k ${EMBED_CACHE_TYPE_K}
+      --type_v ${EMBED_CACHE_TYPE_V}
       --use_mlock true
     environment:
       LLAMA_CUBLAS: "1"
